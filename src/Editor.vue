@@ -1,0 +1,686 @@
+<template>
+  <main v-if="!initialLoading">
+
+    <a-page-header
+      style="border: 1px solid rgb(235, 237, 240)"
+      :title="project.name"
+      @back="$router.push('/projects')"
+    >
+      <template #extra>
+        <a-input-number style="width: 120px" v-model:value="project.bpm" :min="5" :max="600" addon-after="bpm" />
+        <a-button @click="play" shape="circle">
+          <PauseOutlined v-if="playing" />
+          <CaretRightOutlined v-if="!playing" />
+        </a-button>
+      </template>
+    </a-page-header>
+    
+    <div class="editor">
+
+      <div class="side" ref="side">
+
+        <div class="tools">
+          <a-dropdown :trigger="['click']">
+            <a-button>
+              <template #icon>
+                <PlusOutlined />
+              </template>
+            </a-button>
+            <template #overlay>
+              <a-menu>
+                <a-menu-item @click="addTrack">Track</a-menu-item>
+                <a-sub-menu title="Beats">
+                  <a-menu-item v-for="i in [1,2,4,8]" :key="i" @click="project.beats += i">Add {{ i }}</a-menu-item>
+                </a-sub-menu>
+              </a-menu>
+            </template>
+          </a-dropdown>
+          <a-button @click="openSettings = true">
+            <template #icon>
+              <SettingOutlined />
+            </template>
+          </a-button>
+        </div>
+
+        <div v-for="track, i in project.tracks" :key="i" class="track">
+
+          <div class="details">
+            <span :title="`${track.name} (${track.instrumentName})`">{{ track.name }} ({{ track.instrumentName }})</span>
+            <div>
+              <a-button shape="circle" @click="addMelody(track)"><template #icon><PlusOutlined /></template></a-button>
+              <a-button shape="circle" @click="removeTrack(i)"><template #icon><DeleteOutlined /></template></a-button>
+            </div>
+          </div>
+
+          <div class="settings">
+            <a-slider 
+              v-model:value="track.volume"
+              :tip-formatter="val => 'Volume: ' + val" />
+          </div>
+
+        </div>
+
+      </div>
+      <a-dropdown :trigger="['contextmenu']">
+        <div class="content" ref="content">
+
+          <div class="tracks-container" ref="tracks">
+            <div class="tracks">
+              <div class="track-content" v-for="track, i in project.tracks" :key="i"></div>
+            </div>
+          </div>
+
+          <CanvasSizer width="100%" height="100%" ref="tracksCanvas"></CanvasSizer>
+
+        </div>
+
+        <template #overlay>
+          <a-menu>
+            <a-sub-menu title="Move view">
+              <a-menu-item @click="editor.x = 0">To start</a-menu-item>
+              <a-menu-item @click="editor.x = project.beats * editor.scale">To end</a-menu-item>
+              <a-menu-item @click="editor.x = editor.cursor * editor.scale">To cursor</a-menu-item>
+            </a-sub-menu>
+            <a-sub-menu title="Add beats">
+              <a-menu-item v-for="i in [1,2,4,8]" :key="i" @click="project.beats += i">Add {{ i }}</a-menu-item>
+            </a-sub-menu>
+          </a-menu>
+        </template>
+      </a-dropdown>
+
+    </div>
+
+  </main>
+
+  <a-modal v-model:visible="openAddTrack" title="Add Track" @ok="createTrack">
+    
+    <a-space size="large" direction="vertical" style="width: 100%">
+      <a-input v-model:value="newTrack.name" addonBefore="Track Name" />
+      <a-cascader style="width: 100%" v-model:value="newTrack.instrument" :options="newTrack.options" placeholder="Select instrument" />
+    </a-space>
+
+  </a-modal>
+
+  <MelodyEditor :instrument="currentInstrument" @loading="setLoading" v-model:visible="openMelodyEditor" />
+
+
+  <a-drawer
+    v-model:visible="openSettings"
+    title="Settings"
+    placement="left"
+    @close="openSettings = false;"
+    class="settings"
+  >
+    <a-space direction="vertical" size="middle" style="width: 100%">
+      <h3>Project Settings</h3>
+      <a-input v-model:value="project.name" addonBefore="Project Name" />
+      <a-input-number min="0" max="9999" v-model:value="project.beats" addonBefore="Beats" />
+    </a-space>
+
+    <a-divider />
+
+    <a-space direction="vertical" size="middle" style="width: 100%">
+      <h3>Editor Settings</h3>
+      <div class="switch">
+        <span>Invert scroll directions</span>
+        <a-switch v-model:checked="editor.preferences.invertScroll"/>
+      </div>
+    </a-space>
+  </a-drawer>
+
+
+  <Loading :show="loading || initialLoading" />
+
+</template>
+
+<style>
+div#app {
+  height: 100%;
+}
+.full-modal .ant-modal {
+  max-width: 100%;
+  top: 0;
+  padding-bottom: 0;
+  margin: 0;
+}
+.full-modal .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh);
+}
+.full-modal .ant-modal-body {
+  flex: 1;
+  padding: 0;
+  display: flex;
+  overflow-y: scroll;
+}
+.ant-dropdown-menu-title-content {
+  white-space: nowrap;
+}
+.ant-input-number-group-wrapper {
+  width: 100%;
+}
+::-webkit-scrollbar {
+  display: none;
+}
+* {
+  user-select: none;
+}
+</style>
+
+<style scoped>
+main {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+section.ant-layout {
+  height: 100%;
+}
+.editor {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+.editor .side {
+  width: 250px;
+  background: #ddd;
+  display: flex;
+  flex-direction: column;
+  overflow: scroll;
+}
+.editor .side > .tools {
+  display: flex;
+  position: absolute;
+  background: #eee;
+  height: 50px;
+  width: 250px;
+  z-index: 1000;
+  border-right: 1px solid #bbb;
+}
+.editor .side > .tools > * {
+  flex: 1;
+  height: 100%;
+}
+.editor .side > .track {
+  display: flex;
+  flex-direction: column;
+  padding: 7px;
+  width: 100%;
+  height: 75px;
+  background: #ccc;
+  border-bottom: 2px solid #bbb;
+  border-right: 2px solid #bbb;
+}
+.editor .side > .track .details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1;
+}
+.editor .side > .track .details > span {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.editor .side > .track .details > div {
+  display: flex;
+}
+.editor .side > .track:nth-child(2) {
+  margin-top: 50px;
+}
+.editor .content {
+  background: #eee;
+  flex: 1;
+  position: relative;
+}
+.editor .content canvas {
+  position: absolute;
+  top: 0; left: 0;
+}
+.editor .content .tracks {
+  display: flex;
+  flex-direction: column;
+  margin-top: 50px;
+  overflow: scroll;
+}
+.editor .content .tracks > .track-content {
+  width: 100%;
+  height: 75px;
+  background: #ccc;
+  border-bottom: 2px solid #bbb;
+}
+.editor .content .tracks-container {
+  height: 100%;
+  overflow: scroll;
+}
+.settings .switch {
+  display: flex;
+  justify-content: space-between;
+}
+.settings h3 {
+  text-align: center;
+}
+</style>
+
+<script>
+import { DeleteOutlined, CaretRightOutlined, PauseOutlined, PlusOutlined, LoadingOutlined, SettingOutlined } from '@ant-design/icons-vue';
+import CanvasSizer from './components/CanvasSizer.vue';
+import MelodyEditor from './components/MelodyEditor.vue';
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { ref, get, set } from 'firebase/database';
+import { auth, db } from './cloud.js';
+import { SimpleCanvas } from './simple-canvas';
+import * as Tone from 'tone';
+import { message, notification } from 'ant-design-vue';
+import { h } from 'vue';
+
+message.config({
+  maxCount: 3,
+});
+
+const throttle = (func, limit) => {
+  let lastFunc;
+  let lastRan;
+  return function() {
+    const context = this;
+    const args = arguments;
+    if (!lastRan) {
+      func.apply(context, args);
+      lastRan = Date.now();
+    } else {
+      clearTimeout(lastFunc);
+      lastFunc = setTimeout(function() {
+        if (Date.now() - lastRan >= limit) {
+          func.apply(context, args);
+          lastRan = Date.now();
+        }
+      }, limit - (Date.now() - lastRan));
+    }
+  }
+}
+const clamp = (val, min, max) => Math.max(Math.min(val, max), min);
+
+export default {
+  data() {
+    const id = this.$router.currentRoute.value.params.pathMatch[0];
+    return {
+      startTime: 0,
+      id,
+      user: null,
+      openMelodyEditor: false,
+      currentInstrument: '',
+      octave: [0,1,0,1,0,0,1,0,1,0,1,0],
+      noteNames: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
+      editor: {
+        cursor: 0,
+        scale: 100,
+        x: 0,
+        y: 0,
+        preferences: {
+          invertScroll: false
+        }
+      },
+      project: {
+        name: 'test',
+        duration: 0,
+        bpm: 60,
+        beats: 4,
+        tracks: [{
+          instrument: 'piano',
+          instrumentName: 'Piano',
+          name: 'Main Track',
+          volume: 70
+        },{
+          instrument: 'clarinet',
+          instrumentName: 'Clarinet',
+          name: 'Accompagnement',
+          volume: 45
+        }]
+      },
+      initialLoading: true,
+      loading: false,
+      openAddTrack: false,
+      openSettings: false,
+      playing: false,
+      newTrack: {
+        name: '',
+        instrument: '',
+        options: [{
+          value: 'keyboards',
+          label: 'Keyboards',
+          children: [{
+            value: 'piano',
+            label: 'Piano'
+          },{
+            value: 'organ',
+            label: 'Organ'
+          },{
+            value: 'harmonium',
+            label: 'Harmonium'
+          },{
+            value: 'xylophone',
+            label: 'Xylophone'
+          }]
+        },{
+          value: 'stringed',
+          label: 'Stringed',
+          children: [{
+            value: 'harp',
+            label: 'Harp'
+          },{
+            value: 'contrabass',
+            label: 'Contrabass'
+          },{
+            value: 'cello',
+            label: 'Cello'
+          },{
+            value: 'bass-electric',
+            label: 'Electric Bass'
+          },{
+            value: 'violin',
+            label: 'Violin'
+          },{
+            value: 'guitar-acoustic',
+            label: 'Acoustic Guitar'
+          },{
+            value: 'guitar-electric',
+            label: 'Electric Guitar'
+          }]
+        },{
+          value: 'wind',
+          label: 'Wind',
+          children: [{
+            value: 'bassoon',
+            label: 'Bassoon'
+          },{
+            value: 'clarinet',
+            label: 'Clarinet'
+          },{
+            value: 'flute',
+            label: 'Flute'
+          },{
+            value: 'french-horn',
+            label: 'French Horn'
+          },{
+            value: 'saxophone',
+            label: 'Saxophone'
+          },{
+            value: 'trombone',
+            label: 'Trombone'
+          },{
+            value: 'trumpet',
+            label: 'Trumpet'
+          },{
+            value: 'tuba',
+            label: 'Tuba'
+          }]
+        }]
+      }
+    }
+  },
+  watch: {
+    'editor.preferences': {
+      handler() {
+        this.saveEditorChanges();
+      },
+      deep: true
+    },
+    'project': {
+      handler() {
+        this.saveProject();
+      },
+      deep: true
+    }
+  },
+  mounted() {
+    this.initialLoading = false;
+    this.start();
+    return;
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        if (this.user && user.uid != this.user.uid) this.$router.push('/projects');
+        this.user = user;
+
+        console.log('test');
+        get(ref(db, `users/${user.uid}/projects/${this.id}`)).then(snap => {
+          const project = snap.val();
+          if (project) {
+            if (!project.tracks) project.tracks = [];
+            this.project = project;
+            this.initialLoading = false;
+            this.start();
+            return;
+          }
+          this.$router.push('/projects');
+        }).catch(_ => {
+          this.$router.push('/projects');
+        });
+      } else {
+        this.user = null;
+        this.$router.push('/');
+      }
+    });
+  },
+  methods: {
+    setLoading(val) {
+      this.loading = val;
+    },
+    start() {
+      /*** TRACKS CANVAS ***/
+      this.$nextTick(() => {
+        const canvas = this.$refs.tracksCanvas.$el;
+        const ctx = canvas.getContext('2d');
+        const sc = SimpleCanvas.setupCanvas(ctx);
+
+        const MOVES = {
+          cursor: 'cursor',
+          track: 'track',
+          none: ''
+        }
+        let moving = MOVES.none;
+
+        addEventListener('keydown' , e => {
+          if (e.code === 'Space' && document.activeElement === document.body) this.play();
+          if (e.code === 'AltLeft') e.preventDefault();
+        });
+        const pd = e => e.preventDefault();
+        this.$refs.side.addEventListener('wheel', pd);
+        this.$refs.tracks.addEventListener('wheel', pd);
+
+        sc.update = delta => {
+
+          const { getscrolldelta, width } = sc;
+          const tracksHeight = 75*this.project.tracks.length+50;
+
+          sc.cls();
+
+          sc.rectfill(0, 0, width(), 50, '#eee');
+
+          for (let i = 1; i <= this.project.beats; i++) {
+            const x = i * this.editor.scale-this.editor.x;
+            if (x + this.editor.scale < 0) continue;
+            if (x - this.editor.scale > width()) break;
+            sc.line(x, 0, x, tracksHeight, '#aaa');
+            sc.text(i, x-this.editor.scale+3, 17, '#aaa');
+          }
+
+          const cursorX = this.editor.cursor * this.editor.scale - this.editor.x;
+          sc.line(cursorX, 0, cursorX, tracksHeight, '#555');
+          // sc.circfill(cursorX, 10, 10, '#555');
+          sc.rectfill(cursorX-5, 0, 10, 50, '#555');
+
+          if (sc.mousedown() && !moving) {
+            if (sc.mouse()[1] <= 50 && sc.mouse()[1] > 0 && sc.mouse()[0] > 0) {
+              moving = MOVES.cursor;
+              this.playing = false;
+            }
+          }
+
+          if (sc.btn('ALT')) {
+            this.editor.scale += -getscrolldelta() / 20;
+          } else {
+            if (sc.btn('SHIFT') && this.editor.preferences.invertScroll
+            || !sc.btn('SHIFT') && !this.editor.preferences.invertScroll) {
+              this.editor.y += getscrolldelta() / 4;
+            } else {
+              this.editor.x += getscrolldelta() / 4;
+            }
+          }
+
+          this.editor.scale = clamp(this.editor.scale, 10, 500);
+          this.editor.x = clamp(this.editor.x, 0, Math.max(0, this.project.beats * this.editor.scale - width()));
+          this.editor.y = clamp(this.editor.y, 0, Math.max(0, this.project.tracks.length * 75 - this.$refs.side.clientHeight + 50));
+          this.$refs.side.scrollTo(0, this.editor.y);
+          this.$refs.tracks.scrollTo(0, this.editor.y);
+
+          if (!sc.mousedown()) moving = MOVES.none;
+
+          switch (moving) {
+            case MOVES.cursor:
+              this.editor.cursor = (sc.mouse()[0] + this.editor.x) / this.editor.scale;
+              break;
+
+            case MOVES.track:
+
+              break;
+          }
+
+          if (this.editor.cursor < 0) this.editor.cursor = 0;
+
+          if (this.playing) {
+            const advance = (delta / 1000) / (1 / (this.project.bpm / 60));
+            this.editor.cursor += advance;
+          }
+
+          if (this.editor.cursor > this.project.beats) {
+            this.playing = false;
+            console.log((new Date() - this.startTime) / 1000);
+            this.editor.cursor = this.project.beats;
+          }
+        }
+
+      });
+
+      this.$nextTick(() => {
+        window.addEventListener('mousedown', e => {
+          Tone.start();
+        });
+      });
+    },
+    addTrack() {
+      this.openAddTrack = true;
+      this.newTrack.instrument = '';
+      this.newTrack.name = '';
+    },
+    createTrack() {
+      this.openAddTrack = false;
+
+      const value = this.newTrack.instrument[1];
+      let instrumentName = '';
+      outer:for (const type of this.newTrack.options) {
+        for (const instrument of type.children) {
+          if (instrument.value === value) {
+            instrumentName = instrument.label;
+            break outer;
+          }
+        }
+      }
+      this.project.tracks.push({
+        name: this.newTrack.name,
+        instrument: value,
+        instrumentName,
+        volume: 100
+      });
+    },
+    removeTrack(i) {
+      this.project.tracks.splice(i, 1);
+    },
+    async addMelody(track) {
+      this.currentInstrument = track.instrument;
+      this.openMelodyEditor = true;
+    },
+    handleMelodyCreation(i) {
+
+    },
+    saveProject: throttle(async function() {
+      const key = (Math.floor(Math.random() * 0xffffff)).toString(16);
+      notification.open({
+        placement: 'bottomRight',
+        message: 'Saving project...',
+        icon: h(LoadingOutlined, {
+          style: 'color: #1890ff'
+        }),
+        duration: 0,
+        key
+      });
+      try {
+        if (!this.user) throw new Error('No user logon.');
+        console.log('[Firebase] Saving project...');
+        try {
+          await set(ref(db, `users/${this.user.uid}/projects/${this.id}`), this.project);
+        } catch(e) {
+          throw new Error(e);
+        }
+      } catch(e) {
+        notification.error({
+          placement: 'bottomRight',
+          message: 'An error occurred while saving.',
+          duration: 2,
+          key
+        });
+        return;
+      }
+      notification.success({
+        placement: 'bottomRight',
+        message: 'Project saved!',
+        duration: 2,
+        key
+      });
+    }, 1000),
+    saveEditorChanges: throttle(async function() {
+      const key = (Math.floor(Math.random() * 0xffffff)).toString(16);
+      notification.open({
+        placement: 'bottomRight',
+        message: 'Saving preferences...',
+        icon: h(LoadingOutlined, {
+          style: 'color: #1890ff'
+        }),
+        duration: 0,
+        key
+      });
+      try {
+        console.log('[Firebase] Saving user preferences...');
+        const r = ref(db, `users/${this.user.uid}/preferences/`);
+        await set(r, this.editor.preferences);
+      } catch(e) {
+        notification.error({
+          placement: 'bottomRight',
+          message: 'An error occurred while saving.',
+          duration: 2,
+          key
+        });
+        return;
+      }
+      notification.success({
+        placement: 'bottomRight',
+        message: 'Editor preferences saved!',
+        duration: 2,
+        key
+      });
+    }, 1000),
+    play() {
+      this.startTime = new Date();
+      this.playing = !this.playing;
+      if (this.playing && this.editor.cursor >= this.project.beats) this.editor.cursor = 0;
+    }
+  },
+  components: {
+    DeleteOutlined, CaretRightOutlined, PauseOutlined, SettingOutlined,
+    PlusOutlined, LoadingOutlined, CanvasSizer, MelodyEditor
+  }
+}
+</script>
