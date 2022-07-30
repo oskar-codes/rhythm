@@ -1,5 +1,66 @@
+<script setup>
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { ref, get, set } from 'firebase/database';
+import { auth, db } from './js/cloud.js';
+import { useRouter } from 'vue-router';
+import { ref as reactive } from 'vue';
+const router = useRouter();
+
+const user = reactive(await new Promise(resolve => {
+  onAuthStateChanged(auth, resolve);
+}));
+
+if (!user.value) router.push('/login');
+const id = router.currentRoute.value.params.pathMatch[0];
+
+const project = reactive(
+  (await get(
+    ref(db, `users/${user.value.uid}/projects/${id}`)
+  )).val()
+);
+
+if (project.value) {
+  if (!project.value.tracks) project.value.tracks = [];
+  /*
+  name: 'test',
+  duration: 0,
+  bpm: 60,
+  beats: 4,
+  tracks: [{
+    instrument: 'piano',
+    instrumentName: 'Piano',
+    name: 'Main Track',
+    volume: 70
+  },{
+    instrument: 'clarinet',
+    instrumentName: 'Clarinet',
+    name: 'Accompagnement',
+    volume: 45
+  }]
+  */
+} else {
+  router.push('/projects');
+}
+
+const defaultPreferences = {
+  autoSave: true,
+  invertScroll: false
+}
+const editor = reactive(
+  {
+    preferences: (await get(
+      ref(db, `users/${user.value.uid}/preferences/`)
+    )).val() ?? defaultPreferences,
+    cursor: 0,
+    scale: 100,
+    x: 0,
+    y: 0
+  }
+);
+</script>
+
 <template>
-  <main v-if="!initialLoading">
+  <main>
 
     <a-page-header
       style="border: 1px solid rgb(235, 237, 240)"
@@ -7,6 +68,7 @@
       @back="$router.push('/projects')"
     >
       <template #extra>
+        <a-button @click="saveProject">Save Project</a-button>
         <a-input-number style="width: 120px" v-model:value="project.bpm" :min="5" :max="600" addon-after="bpm" />
         <a-button @click="play" shape="circle">
           <PauseOutlined v-if="playing" />
@@ -115,6 +177,7 @@
       <h3>Project Settings</h3>
       <a-input v-model:value="project.name" addonBefore="Project Name" />
       <a-input-number min="0" max="9999" v-model:value="project.beats" addonBefore="Beats" />
+      <a-button type="primary" @click="saveProject">Save Project Settings</a-button>
     </a-space>
 
     <a-divider />
@@ -122,14 +185,19 @@
     <a-space direction="vertical" size="middle" style="width: 100%">
       <h3>Editor Settings</h3>
       <div class="switch">
+        <span>Auto save project</span>
+        <a-switch v-model:checked="editor.preferences.autoSave"/>
+      </div>
+      <div class="switch">
         <span>Invert scroll directions</span>
         <a-switch v-model:checked="editor.preferences.invertScroll"/>
       </div>
+      <a-button type="primary" @click="saveEditorChanges">Save Editor Settings</a-button>
     </a-space>
   </a-drawer>
 
 
-  <Loading :show="loading || initialLoading" />
+  <Loading :show="loading" />
 
 </template>
 
@@ -165,6 +233,10 @@ div#app {
 }
 * {
   user-select: none;
+}
+.ant-drawer-content button.ant-btn {
+  display: block;
+  margin: 0 auto;
 }
 </style>
 
@@ -269,78 +341,21 @@ section.ant-layout {
 import { DeleteOutlined, CaretRightOutlined, PauseOutlined, PlusOutlined, LoadingOutlined, SettingOutlined } from '@ant-design/icons-vue';
 import CanvasSizer from './components/CanvasSizer.vue';
 import MelodyEditor from './components/MelodyEditor.vue';
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref, get, set } from 'firebase/database';
-import { auth, db } from './cloud.js';
-import { SimpleCanvas } from './simple-canvas';
+import { SimpleCanvas } from './js/simple-canvas.js';
 import * as Tone from 'tone';
-import { message, notification } from 'ant-design-vue';
+import { notification } from 'ant-design-vue';
 import { h } from 'vue';
-
-message.config({
-  maxCount: 3,
-});
-
-const throttle = (func, limit) => {
-  let lastFunc;
-  let lastRan;
-  return function() {
-    const context = this;
-    const args = arguments;
-    if (!lastRan) {
-      func.apply(context, args);
-      lastRan = Date.now();
-    } else {
-      clearTimeout(lastFunc);
-      lastFunc = setTimeout(function() {
-        if (Date.now() - lastRan >= limit) {
-          func.apply(context, args);
-          lastRan = Date.now();
-        }
-      }, limit - (Date.now() - lastRan));
-    }
-  }
-}
-const clamp = (val, min, max) => Math.max(Math.min(val, max), min);
+import { throttle, clamp } from './js/utility.js';
 
 export default {
   data() {
     const id = this.$router.currentRoute.value.params.pathMatch[0];
     return {
-      startTime: 0,
       id,
-      user: null,
       openMelodyEditor: false,
       currentInstrument: '',
       octave: [0,1,0,1,0,0,1,0,1,0,1,0],
       noteNames: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-      editor: {
-        cursor: 0,
-        scale: 100,
-        x: 0,
-        y: 0,
-        preferences: {
-          invertScroll: false
-        }
-      },
-      project: {
-        name: 'test',
-        duration: 0,
-        bpm: 60,
-        beats: 4,
-        tracks: [{
-          instrument: 'piano',
-          instrumentName: 'Piano',
-          name: 'Main Track',
-          volume: 70
-        },{
-          instrument: 'clarinet',
-          instrumentName: 'Clarinet',
-          name: 'Accompagnement',
-          volume: 45
-        }]
-      },
-      initialLoading: true,
       loading: false,
       openAddTrack: false,
       openSettings: false,
@@ -422,43 +437,23 @@ export default {
     }
   },
   watch: {
-    'editor.preferences': {
-      handler() {
-        this.saveEditorChanges();
-      },
-      deep: true
-    },
     'project': {
       handler() {
-        this.saveProject();
+        if (this.editor.preferences.autoSave && !this.openSettings) {
+          this.saveProject();
+        }
       },
       deep: true
     }
   },
   mounted() {
-    this.initialLoading = false;
-    this.start();
-    return;
 
-    onAuthStateChanged(auth, (user) => {
+    this.start();
+
+    onAuthStateChanged(auth, user => {
       if (user) {
         if (this.user && user.uid != this.user.uid) this.$router.push('/projects');
         this.user = user;
-
-        console.log('test');
-        get(ref(db, `users/${user.uid}/projects/${this.id}`)).then(snap => {
-          const project = snap.val();
-          if (project) {
-            if (!project.tracks) project.tracks = [];
-            this.project = project;
-            this.initialLoading = false;
-            this.start();
-            return;
-          }
-          this.$router.push('/projects');
-        }).catch(_ => {
-          this.$router.push('/projects');
-        });
       } else {
         this.user = null;
         this.$router.push('/');
@@ -533,9 +528,9 @@ export default {
 
           this.editor.scale = clamp(this.editor.scale, 10, 500);
           this.editor.x = clamp(this.editor.x, 0, Math.max(0, this.project.beats * this.editor.scale - width()));
-          this.editor.y = clamp(this.editor.y, 0, Math.max(0, this.project.tracks.length * 75 - this.$refs.side.clientHeight + 50));
-          this.$refs.side.scrollTo(0, this.editor.y);
-          this.$refs.tracks.scrollTo(0, this.editor.y);
+          this.editor.y = clamp(this.editor.y, 0, Math.max(0, this.project.tracks.length * 75 - this.$refs.side?.clientHeight + 50));
+          this.$refs.side?.scrollTo(0, this.editor.y);
+          this.$refs.tracks?.scrollTo(0, this.editor.y);
 
           if (!sc.mousedown()) moving = MOVES.none;
 
@@ -555,10 +550,9 @@ export default {
             const advance = (delta / 1000) / (1 / (this.project.bpm / 60));
             this.editor.cursor += advance;
           }
-
+          
           if (this.editor.cursor > this.project.beats) {
             this.playing = false;
-            console.log((new Date() - this.startTime) / 1000);
             this.editor.cursor = this.project.beats;
           }
         }
@@ -640,7 +634,7 @@ export default {
         duration: 2,
         key
       });
-    }, 1000),
+    }, 3e3),
     saveEditorChanges: throttle(async function() {
       const key = (Math.floor(Math.random() * 0xffffff)).toString(16);
       notification.open({
@@ -671,9 +665,8 @@ export default {
         duration: 2,
         key
       });
-    }, 1000),
+    }, 3e3),
     play() {
-      this.startTime = new Date();
       this.playing = !this.playing;
       if (this.playing && this.editor.cursor >= this.project.beats) this.editor.cursor = 0;
     }

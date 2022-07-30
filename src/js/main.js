@@ -1,13 +1,13 @@
 import { createApp } from 'vue';
-import App from './App.vue';
+import App from '../App.vue';
 import { createWebHistory, createRouter } from 'vue-router';
 
-import Home from './Home.vue';
-import Projects from './Projects.vue';
-import CreateAccount from './CreateAccount.vue';
-import Login from './Login.vue';
-import Editor from './Editor.vue';
-import NotFound from './NotFound.vue';
+import Home from '../Home.vue';
+import Projects from '../Projects.vue';
+import CreateAccount from '../CreateAccount.vue';
+import Login from '../Login.vue';
+import Editor from '../Editor.vue';
+import NotFound from '../NotFound.vue';
 
 const routes = [
   { 
@@ -57,3 +57,4 @@ router.afterEach((to, from) => {
 const app = createApp(App);
 app.use(router);
 app.mount('#app');
+window.app = app;

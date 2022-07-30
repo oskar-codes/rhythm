@@ -1,7 +1,26 @@
+<script setup>
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth, db } from './js/cloud.js';
+import { useRouter } from 'vue-router';
+import { ref as reactive } from 'vue';
+
+const user = reactive(await new Promise(resolve => {
+  onAuthStateChanged(auth, resolve);
+}));
+if (!user.value) useRouter().push('/login');
+
+const projects = reactive(
+  (await get(
+    ref(db, `users/${user.value.uid}/projects/`)
+  )).val()
+);
+if (!projects.value) projects.value = {};
+</script>
+
 <template>
   <a-page-header
     style="border: 1px solid rgb(235, 237, 240)"
-    title="PROJECTS"
+    title="Projects"
     @back="$router.push('/')"
   >
     <template #extra>
@@ -15,52 +34,45 @@
 
   <a-card
     class="project"
-    v-for="project, i in projects"
-    :key="i"
+    v-for="project, key in projects"
+    :key="key"
     :title="project.name">
-    <template #extra><span>{{ project.duration }}s</span></template>
+    <template #extra><span>{{ Math.round(project.beats / project.bpm * 60) }}s</span></template>
     
     <div class="icons">
-      <a-button type="primary" shape="circle" class="icon green" @click="this.$router.push(`/projects/${project.id}`)">
+      <a-button type="primary" shape="circle" class="icon green" @click="this.$router.push(`/projects/${key}`)">
         <template #icon><EditOutlined /></template>
       </a-button>
-      <a-button type="primary" shape="circle" class="icon grey" @click="projectOptions = copy(project); openProjectOptions = true;">
+      <a-button type="primary" shape="circle" class="icon grey" @click="editKey = key; openProjectOptions = true;">
         <template #icon><SettingOutlined /></template>
       </a-button>
-      <a-button type="primary" shape="circle" class="icon red" @click="deleteProject = project; openDeleteProject = true;">
+      <a-button type="primary" shape="circle" class="icon red" @click="editKey = key; openDeleteProject = true;">
         <template #icon><DeleteOutlined /></template>
       </a-button>
     </div>
     
   </a-card>
 
-  <a-modal v-model:visible="openDeleteProject" title="Delete Project" @ok="confirmDelete(deleteProject)" @cancel="openDeleteProject = false;">
-    Are you sure you want to delete "{{ deleteProject.name }}"?
+  <a-modal v-model:visible="openDeleteProject" title="Delete Project" @ok="confirmDelete()" @cancel="openDeleteProject = false;">
+    Are you sure you want to delete "{{ editProject.name }}"? This action cannot be reversed.
   </a-modal>
 
   <a-modal v-model:visible="openCreateProject" title="Create Project" @ok="createProject">
     <a-input v-model:value="newProjectName" addonBefore="Project Name" />
   </a-modal>
 
-  <!-- <Settings 
-    @close-options="openProjectOptions = false; updateProjects();"
-    :open="openProjectOptions"
-    :project="projectOptions"
-    :uid="user?.uid" /> -->
-
   <a-drawer
     v-model:visible="openProjectOptions"
     title="Project Settings"
     placement="left"
-    @close="openProjectOptions = false; updateProjects();"
+    @close="openProjectOptions = false;"
   >
-    <a-space direction="vertical" size="large">
-      <a-input v-model:value="projectOptions.name" addonBefore="Project Name" />
+    <a-space direction="vertical" size="large" style="width: 100%">
+      <a-input v-model:value="editProject.name" addonBefore="Project Name" />
+      <a-input disabled addonBefore="Project ID" :value="editKey" />
       <a-button style="margin: 0 auto; display: block;" type="primary" @click="saveChanges">Save</a-button>
     </a-space>
   </a-drawer>
-
-  <Loading :show="loading" />
 
 </template>
 
@@ -107,31 +119,25 @@
 </style>
 
 <script>
-import { EditOutlined, SettingOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons-vue';
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { EditOutlined, SettingOutlined, DeleteOutlined, PlusOutlined, LoadingOutlined } from '@ant-design/icons-vue';
 import { ref, get, push, remove, set } from 'firebase/database';
-import { auth, db } from './cloud.js';
+import { notification } from 'ant-design-vue';
+import { throttle, randomKey } from './js/utility.js';
+import { h } from 'vue';
 
 export default {
   data() {
     return {
-      projects: [{
-        name: 'test',
-        duration: 0,
-        tracks: []
-      },{
-        name: 'test',
-        duration: 0,
-        tracks: []
-      }],
-      user: null,
-      deleteProject: null,
       openDeleteProject: false,
       openProjectOptions: false,
-      projectOptions: null,
       openCreateProject: false,
+      editKey: null,
       newProjectName: '',
-      loading: true
+    }
+  },
+  computed: {
+    editProject() {
+      return this.projects[this.editKey];
     }
   },
   methods: {
@@ -139,49 +145,57 @@ export default {
       const r = ref(db, `users/${this.user.uid}/projects`);
       const newRef = await push(r, {
         name: this.newProjectName,
-        duration: 0,
         beats: 4,
         bpm: 60,
         tracks: []
       });
       this.$router.push(`/projects/${newRef.key}`);
     },
-    logOut() {
-      signOut(auth);
+    async logOut() {
+      await signOut(auth);
+      this.$router.push('/');
     },
-    async confirmDelete(project) {
-      const r = ref(db, `users/${this.user.uid}/projects/${project.id}`);
+    async confirmDelete() {
+      const r = ref(db, `users/${this.user.uid}/projects/${this.editKey}`);
       await remove(r);
-      this.updateProjects();
+      delete this.projects[this.editKey];
       this.openDeleteProject = false;
     },
-    async updateProjects() {
-      if (this.user) {
-        this.loading = true;
-        const snap = await get(ref(db, `users/${this.user.uid}/projects`));
-        const data = snap.val();
-        this.projects = [];
-        if (data) this.projects = Object.values(data).map((e,i) => ({...e, id: Object.keys(data)[i]}));
-        this.loading = false;
+    saveChanges: throttle(async function() {
+      const r = ref(db, `users/${this.user.uid}/projects/${this.editKey}`);
+      const key = randomKey();
+      notification.open({
+        placement: 'bottomRight',
+        message: 'Saving project...',
+        icon: h(LoadingOutlined, {
+          style: 'color: #1890ff'
+        }),
+        duration: 0,
+        key
+      });
+      try {
+        await set(r, this.editProject);
+        notification.success({
+          placement: 'bottomRight',
+          message: 'Project saved!',
+          duration: 2,
+          key
+        });
+      } catch (e) {
+        notification.error({
+          placement: 'bottomRight',
+          message: 'An error occurred while saving.',
+          duration: 2,
+          key
+        });
       }
-    },
-    async saveChanges() {
-      const r = ref(db, `users/${this.user.uid}/projects/${this.projectOptions.id}`);
-      delete this.projectOptions.id;
-      await set(r, this.projectOptions);
-      this.updateProjects();
-      this.openProjectOptions = false;
-    },
-    copy(object) {
-      return JSON.parse(JSON.stringify(object));
-    }
+    }, 3e3)
   },
-  async mounted() {
-    onAuthStateChanged(auth, (user) => {
+  mounted() {
+    onAuthStateChanged(auth, user => {
       if (user) {
-        if (this.user && user.uid !== this.user.uid) this.$router.push('/projects');
+        if (this.user && user.uid != this.user.uid) this.$router.push('/projects');
         this.user = user;
-        this.updateProjects();
       } else {
         this.user = null;
         this.$router.push('/');

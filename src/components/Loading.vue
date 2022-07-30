@@ -15,7 +15,6 @@
   align-items: center;
   font-size: 60px;
   background-color: white;
-  opacity: 0.6;
   z-index: 1001;
 }
 </style>

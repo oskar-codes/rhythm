@@ -1,3 +1,12 @@
+<script setup>
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from './js/cloud.js';
+
+const user = await new Promise(resolve => {
+  onAuthStateChanged(auth, resolve);
+});
+</script>
+
 <template>
   <main>
     <Title text="RHYTHM"/>
@@ -25,26 +34,18 @@ main {
 
 <script>
 import Title from './components/Title.vue'
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from './cloud.js';
 
 export default {
   data() {
-    return {
-      user: null
-    }
+    return {}
+  },
+  mounted() {
+    onAuthStateChanged(auth, user => {
+      this.user = user;
+    });
   },
   components: {
     Title
   },
-  mounted() {
-    onAuthStateChanged(auth, user => {
-      if (user) {
-        this.user = user;
-      } else {
-        this.user = null;
-      }
-    });
-  }
 }
 </script>

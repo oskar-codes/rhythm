@@ -47,7 +47,7 @@ main {
 </style>
 
 <script>
-import { auth } from './cloud.js';
+import { auth } from './js/cloud.js';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 
 export default {

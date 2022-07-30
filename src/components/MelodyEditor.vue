@@ -60,7 +60,7 @@
 <script>
 import { CaretRightOutlined, PauseOutlined } from '@ant-design/icons-vue';
 import CanvasSizer from './CanvasSizer.vue';
-import { urls } from '../samples.js';
+import { urls } from '../js/samples.js';
 import * as Tone from 'tone';
 import { Piano } from 'nexusui';
 
