@@ -37,7 +37,7 @@ if (!projects.value) projects.value = {};
     v-for="project, key in projects"
     :key="key"
     :title="project.name">
-    <template #extra><span>{{ Math.round(project.beats / project.bpm * 60) }}s</span></template>
+    <template #extra><span>{{ Math.round(project.bars / project.bpm * 60) }}s</span></template>
     
     <div class="icons">
       <a-button type="primary" shape="circle" class="icon green" @click="this.$router.push(`/projects/${key}`)">

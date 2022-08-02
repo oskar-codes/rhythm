@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import App from '../App.vue';
 import { createWebHistory, createRouter } from 'vue-router';
+// import VueInteractJs from "vue-interactjs";
 
 import Home from '../Home.vue';
 import Projects from '../Projects.vue';
@@ -48,7 +49,7 @@ const router = createRouter({
 });
 
 import { nextTick } from 'vue';
-router.afterEach((to, from) => {
+router.afterEach(to => {
   nextTick(() => {
     document.title = 'RHYTHM | ' + (to.name ?? '');
   });
@@ -56,5 +57,6 @@ router.afterEach((to, from) => {
 
 const app = createApp(App);
 app.use(router);
+// app.use(VueInteractJs);
+
 app.mount('#app');
-window.app = app;

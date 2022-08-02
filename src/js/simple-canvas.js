@@ -23,7 +23,10 @@ export const SimpleCanvas = {
         }
       },
       cls(c) {
-        !!c ? rectfill(0,0,ctx.canvas.width,ctx.canvas.height,c) : ctx.clearRect(0,0,ctx.canvas.clientWidth,ctx.canvas.clientHeight);
+        !!c ? this.rectfill(0,0,ctx.canvas.width,ctx.canvas.height,c) : ctx.clearRect(0,0,ctx.canvas.clientWidth,ctx.canvas.clientHeight);
+      },
+      clearrect(x,y,w,h) {
+        ctx.clearRect(x,y,w,h);
       },
       rect(a,b,c,d,e,f) {
         e = (!!e ? e : "#000000");
@@ -153,7 +156,7 @@ export const SimpleCanvas = {
       },
       height() {
         return ctx.canvas.getBoundingClientRect().height;
-      }
+      },
     };
 
     function loop(timestamp) {

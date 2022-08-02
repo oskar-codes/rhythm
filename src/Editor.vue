@@ -4,6 +4,7 @@ import { ref, get, set } from 'firebase/database';
 import { auth, db } from './js/cloud.js';
 import { useRouter } from 'vue-router';
 import { ref as reactive } from 'vue';
+import { Track, Instrument, Melody as M, Key, Note } from './js/classes.js';
 const router = useRouter();
 
 const user = reactive(await new Promise(resolve => {
@@ -21,30 +22,42 @@ const project = reactive(
 
 if (project.value) {
   if (!project.value.tracks) project.value.tracks = [];
-  /*
-  name: 'test',
-  duration: 0,
-  bpm: 60,
-  beats: 4,
-  tracks: [{
-    instrument: 'piano',
-    instrumentName: 'Piano',
-    name: 'Main Track',
-    volume: 70
-  },{
-    instrument: 'clarinet',
-    instrumentName: 'Clarinet',
-    name: 'Accompagnement',
-    volume: 45
-  }]
-  */
+  
+  project.value.tracks = project.value.tracks.map(track => {
+    if (!track.melodies) track.melodies = [];
+
+    return new Track(
+      {
+        name: track.name,
+        volume: track.volume,
+        instrument: new Instrument({...track.instrument}),
+        melodies: track.melodies.map(melody => {
+          if (!melody.notes) melody.notes = [];
+          return new M({
+            notes: melody.notes.map(note => new Note({
+              key: new Key(note.key.name, note.key.octave),
+              start: note.start,
+              duration: note.duration
+            })),
+            start: melody.start,
+            bars: melody.bars
+          }
+          );
+        })
+      })
+  });
+
+  for (const track of project.value.tracks) {
+    if (!track.melodies) track.melodies = [];
+  }
 } else {
   router.push('/projects');
 }
 
 const defaultPreferences = {
   autoSave: true,
-  invertScroll: false
+  invertScroll: false,
+  lockNotes: true
 }
 const editor = reactive(
   {
@@ -91,8 +104,8 @@ const editor = reactive(
             <template #overlay>
               <a-menu>
                 <a-menu-item @click="addTrack">Track</a-menu-item>
-                <a-sub-menu title="Beats">
-                  <a-menu-item v-for="i in [1,2,4,8]" :key="i" @click="project.beats += i">Add {{ i }}</a-menu-item>
+                <a-sub-menu title="Bars">
+                  <a-menu-item v-for="i in [1,2,4,8]" :key="i" @click="project.bars += i">Add {{ i }}</a-menu-item>
                 </a-sub-menu>
               </a-menu>
             </template>
@@ -104,13 +117,32 @@ const editor = reactive(
           </a-button>
         </div>
 
-        <div v-for="track, i in project.tracks" :key="i" class="track">
+        <div v-for="track, i in project.tracks" :key="track.name" class="track">
 
           <div class="details">
-            <span :title="`${track.name} (${track.instrumentName})`">{{ track.name }} ({{ track.instrumentName }})</span>
+            <span :title="`${track.name} (${track.instrument.name})`">{{ track.name }} ({{ track.instrument.name }})</span>
             <div>
-              <a-button shape="circle" @click="addMelody(track)"><template #icon><PlusOutlined /></template></a-button>
-              <a-button shape="circle" @click="removeTrack(i)"><template #icon><DeleteOutlined /></template></a-button>
+              <a-dropdown :trigger="['click']">
+                <a-tooltip>
+                  <template #title>Add Melody</template>
+                  <a-button shape="circle" ><template #icon><PlusOutlined /></template></a-button>
+                </a-tooltip>
+                <template #overlay>
+                  <a-menu>
+                    <a-sub-menu title="Melody Editor">
+                      <a-menu-item @click="addMelody(track, bars)" v-for="bars in [1,2,4,8]" :key="bars">{{ bars }} bars</a-menu-item>
+                    </a-sub-menu>
+                    <a-sub-menu title="Midi File">
+                      <a-menu-item @click="uploadMidi">Upload File</a-menu-item>
+                      <a-menu-item>Record File</a-menu-item>
+                    </a-sub-menu>
+                  </a-menu>
+                </template>
+              </a-dropdown>
+              <a-tooltip>
+                <template #title>Delete Track</template>
+                <a-button shape="circle" @click="removeTrack(i)"><template #icon><DeleteOutlined /></template></a-button>
+              </a-tooltip>
             </div>
           </div>
 
@@ -123,12 +155,23 @@ const editor = reactive(
         </div>
 
       </div>
-      <a-dropdown :trigger="['contextmenu']">
+      <a-dropdown :disabled="focusMelodyContext" :trigger="['contextmenu']">
         <div class="content" ref="content">
 
           <div class="tracks-container" ref="tracks">
             <div class="tracks">
-              <div class="track-content" v-for="track, i in project.tracks" :key="i"></div>
+              <div class="track-content" v-for="track in project.tracks" :key="track.identifier">
+                <Melody
+                v-for="melody,i in track.melodies"
+                :key="melody.identifier"
+                :preferences="editor.preferences"
+                :scale="editor.scale"
+                :bars="project.bars"
+                v-model:melody="track.melodies[i]"
+                @delete="removeMelody(track, i)"
+                @duplicate="duplicateMelody(track, melody)"
+                class="melody" />
+              </div>
             </div>
           </div>
 
@@ -138,13 +181,17 @@ const editor = reactive(
 
         <template #overlay>
           <a-menu>
-            <a-sub-menu title="Move view">
+            <a-sub-menu title="Move View">
               <a-menu-item @click="editor.x = 0">To start</a-menu-item>
-              <a-menu-item @click="editor.x = project.beats * editor.scale">To end</a-menu-item>
+              <a-menu-item @click="editor.x = project.bars * editor.scale">To end</a-menu-item>
               <a-menu-item @click="editor.x = editor.cursor * editor.scale">To cursor</a-menu-item>
             </a-sub-menu>
-            <a-sub-menu title="Add beats">
-              <a-menu-item v-for="i in [1,2,4,8]" :key="i" @click="project.beats += i">Add {{ i }}</a-menu-item>
+            <a-sub-menu title="Move Cursor">
+              <a-menu-item @click="editor.cursor = 0">To start</a-menu-item>
+              <a-menu-item @click="editor.cursor = project.bars * editor.scale">To end</a-menu-item>
+            </a-sub-menu>
+            <a-sub-menu title="Add Bars">
+              <a-menu-item v-for="i in [1,2,4,8]" :key="i" @click="project.bars += i">Add {{ i }}</a-menu-item>
             </a-sub-menu>
           </a-menu>
         </template>
@@ -163,7 +210,15 @@ const editor = reactive(
 
   </a-modal>
 
-  <MelodyEditor :instrument="currentInstrument" @loading="setLoading" v-model:visible="openMelodyEditor" />
+  <MelodyEditor 
+    :track="currentTrack"
+    :bars="barsToAdd"
+    :bpm="project.bpm"
+    :preferences="editor.preferences"
+    @loading="setLoading"
+    v-model:visible="openMelodyEditor"
+    @done="handleMelodyCreation"
+  />
 
 
   <a-drawer
@@ -176,7 +231,7 @@ const editor = reactive(
     <a-space direction="vertical" size="middle" style="width: 100%">
       <h3>Project Settings</h3>
       <a-input v-model:value="project.name" addonBefore="Project Name" />
-      <a-input-number min="0" max="9999" v-model:value="project.beats" addonBefore="Beats" />
+      <a-input-number min="0" max="9999" v-model:value="project.bars" addonBefore="Bars" />
       <a-button type="primary" @click="saveProject">Save Project Settings</a-button>
     </a-space>
 
@@ -191,6 +246,10 @@ const editor = reactive(
       <div class="switch">
         <span>Invert scroll directions</span>
         <a-switch v-model:checked="editor.preferences.invertScroll"/>
+      </div>
+      <div class="switch">
+        <span>Lock movement direction when moving notes</span>
+        <a-switch v-model:checked="editor.preferences.lockNotes"/>
       </div>
       <a-button type="primary" @click="saveEditorChanges">Save Editor Settings</a-button>
     </a-space>
@@ -215,12 +274,6 @@ div#app {
   display: flex;
   flex-direction: column;
   height: calc(100vh);
-}
-.full-modal .ant-modal-body {
-  flex: 1;
-  padding: 0;
-  display: flex;
-  overflow-y: scroll;
 }
 .ant-dropdown-menu-title-content {
   white-space: nowrap;
@@ -311,6 +364,7 @@ section.ant-layout {
 .editor .content canvas {
   position: absolute;
   top: 0; left: 0;
+  pointer-events: none;
 }
 .editor .content .tracks {
   display: flex;
@@ -323,6 +377,7 @@ section.ant-layout {
   height: 75px;
   background: #ccc;
   border-bottom: 2px solid #bbb;
+  position: relative;
 }
 .editor .content .tracks-container {
   height: 100%;
@@ -341,11 +396,28 @@ section.ant-layout {
 import { DeleteOutlined, CaretRightOutlined, PauseOutlined, PlusOutlined, LoadingOutlined, SettingOutlined } from '@ant-design/icons-vue';
 import CanvasSizer from './components/CanvasSizer.vue';
 import MelodyEditor from './components/MelodyEditor.vue';
+import Melody from './components/Melody.vue';
 import { SimpleCanvas } from './js/simple-canvas.js';
 import * as Tone from 'tone';
 import { notification } from 'ant-design-vue';
 import { h } from 'vue';
 import { throttle, clamp } from './js/utility.js';
+import * as midiManager from 'midi-file';
+import { loadSynth, playKey, stopKey, stopAll } from './js/tone-wrapper.js';
+
+(async () => {
+  
+  // Read MIDI file into a buffer
+  const response = await fetch('../example.mid');
+  const input = await response.arrayBuffer();
+
+  console.log(input);
+
+  // Convert buffer to midi object
+  const parsed = midiManager.parseMidi(input);
+
+  console.log(parsed);
+});
 
 export default {
   data() {
@@ -353,16 +425,19 @@ export default {
     return {
       id,
       openMelodyEditor: false,
-      currentInstrument: '',
+      currentTrack: null,
       octave: [0,1,0,1,0,0,1,0,1,0,1,0],
       noteNames: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
       loading: false,
       openAddTrack: false,
       openSettings: false,
       playing: false,
+      playedNotes: [],
+      focusMelodyContext: false,
+      barsToAdd: 1,
       newTrack: {
         name: '',
-        instrument: '',
+        instrument: null,
         options: [{
           value: 'keyboards',
           label: 'Keyboards',
@@ -437,7 +512,7 @@ export default {
     }
   },
   watch: {
-    'project': {
+    project: {
       handler() {
         if (this.editor.preferences.autoSave && !this.openSettings) {
           this.saveProject();
@@ -495,43 +570,33 @@ export default {
 
           sc.rectfill(0, 0, width(), 50, '#eee');
 
-          for (let i = 1; i <= this.project.beats; i++) {
+          // Draw beats and bars
+          for (let i = 1; i <= this.project.bars; i++) {
             const x = i * this.editor.scale-this.editor.x;
             if (x + this.editor.scale < 0) continue;
             if (x - this.editor.scale > width()) break;
+
+            for (let j = 1; j < 4; j++) {
+              const x2 = x + j * this.editor.scale / 4 - this.editor.scale;
+              sc.line(x2, 25, x2, 50, '#aaa');
+            }
+
             sc.line(x, 0, x, tracksHeight, '#aaa');
             sc.text(i, x-this.editor.scale+3, 17, '#aaa');
           }
 
+          // Draw cursor
           const cursorX = this.editor.cursor * this.editor.scale - this.editor.x;
           sc.line(cursorX, 0, cursorX, tracksHeight, '#555');
-          // sc.circfill(cursorX, 10, 10, '#555');
           sc.rectfill(cursorX-5, 0, 10, 50, '#555');
 
+          // Enable moving cursor
           if (sc.mousedown() && !moving) {
             if (sc.mouse()[1] <= 50 && sc.mouse()[1] > 0 && sc.mouse()[0] > 0) {
               moving = MOVES.cursor;
               this.playing = false;
             }
           }
-
-          if (sc.btn('ALT')) {
-            this.editor.scale += -getscrolldelta() / 20;
-          } else {
-            if (sc.btn('SHIFT') && this.editor.preferences.invertScroll
-            || !sc.btn('SHIFT') && !this.editor.preferences.invertScroll) {
-              this.editor.y += getscrolldelta() / 4;
-            } else {
-              this.editor.x += getscrolldelta() / 4;
-            }
-          }
-
-          this.editor.scale = clamp(this.editor.scale, 10, 500);
-          this.editor.x = clamp(this.editor.x, 0, Math.max(0, this.project.beats * this.editor.scale - width()));
-          this.editor.y = clamp(this.editor.y, 0, Math.max(0, this.project.tracks.length * 75 - this.$refs.side?.clientHeight + 50));
-          this.$refs.side?.scrollTo(0, this.editor.y);
-          this.$refs.tracks?.scrollTo(0, this.editor.y);
-
           if (!sc.mousedown()) moving = MOVES.none;
 
           switch (moving) {
@@ -543,18 +608,48 @@ export default {
 
               break;
           }
-
           if (this.editor.cursor < 0) this.editor.cursor = 0;
-
           if (this.playing) {
-            const advance = (delta / 1000) / (1 / (this.project.bpm / 60));
+            const advance = (delta / 1000) / (4 / (this.project.bpm / 60));
             this.editor.cursor += advance;
+
+            for (const track of this.project.tracks) {
+              for (const melody of track.melodies) {
+                for (const note of melody.notes) {
+                  if (this.editor.cursor >= note.start + melody.start && this.editor.cursor < melody.start + note.start + note.duration && !this.playedNotes.includes(note.identifier + melody.identifier)) {
+                    playKey(track.instrument.identifier, note.key);
+                    this.playedNotes.push(note.identifier + melody.identifier);
+                  }
+
+                  if (this.editor.cursor >= note.start + note.duration + melody.start && this.playedNotes.includes(note.identifier + melody.identifier)) {
+                    stopKey(track.instrument.identifier, note.key);
+                    this.playedNotes.splice(this.playedNotes.indexOf(note.identifier + melody.identifier), 1);
+                  }
+                }
+              }
+            }
           }
-          
-          if (this.editor.cursor > this.project.beats) {
+          if (this.editor.cursor > this.project.bars) {
             this.playing = false;
-            this.editor.cursor = this.project.beats;
+            this.editor.cursor = this.project.bars;
           }
+
+          // Scrolling to zoom and pan
+          if (sc.btn('ALT')) {
+            this.editor.scale += -getscrolldelta() / 20;
+          } else {
+            if (sc.btn('SHIFT') && this.editor.preferences.invertScroll
+            || !sc.btn('SHIFT') && !this.editor.preferences.invertScroll) {
+              this.editor.y += getscrolldelta() / 4;
+            } else {
+              this.editor.x += getscrolldelta() / 4;
+            }
+          }
+          this.editor.scale = clamp(this.editor.scale, 10, 500);
+          this.editor.x = clamp(this.editor.x, 0, Math.max(0, this.project.bars * this.editor.scale - width()));
+          this.editor.y = clamp(this.editor.y, 0, Math.max(0, this.project.tracks.length * 75 - this.$refs.side?.clientHeight + 50));
+          this.$refs.side?.scrollTo(0, this.editor.y);
+          this.$refs.tracks?.scrollTo(0, this.editor.y);
         }
 
       });
@@ -563,11 +658,15 @@ export default {
         window.addEventListener('mousedown', e => {
           Tone.start();
         });
+
+        window.addEventListener('mousemove', e => {
+          this.focusMelodyContext = e.target?.classList?.contains('melody');
+        });
       });
     },
     addTrack() {
       this.openAddTrack = true;
-      this.newTrack.instrument = '';
+      this.newTrack.instrument = null;
       this.newTrack.name = '';
     },
     createTrack() {
@@ -583,22 +682,38 @@ export default {
           }
         }
       }
-      this.project.tracks.push({
+      this.project.tracks.push(new Track({
         name: this.newTrack.name,
-        instrument: value,
-        instrumentName,
-        volume: 100
-      });
+        instrument: new Instrument({
+          name: instrumentName,
+          identifier: value
+        }),
+        volume: 100,
+        melodies: []
+      }));
     },
     removeTrack(i) {
       this.project.tracks.splice(i, 1);
     },
-    async addMelody(track) {
-      this.currentInstrument = track.instrument;
+    addMelody(track, bars) {
+      this.currentTrack = track;
+      this.barsToAdd = bars;
       this.openMelodyEditor = true;
     },
-    handleMelodyCreation(i) {
+    removeMelody(track, i) {
+      track.melodies.splice(i, 1);
+    },
+    duplicateMelody(track, melody) {
+      const newMelody = melody.copy();
+      newMelody.start += melody.bars;
+      track.melodies.push(newMelody);
+    },
+    uploadMidi() {
 
+    },
+    handleMelodyCreation(melody) {
+      if (melody.notes.length === 0) return;
+      this.currentTrack.melodies.push(melody);
     },
     saveProject: throttle(async function() {
       const key = (Math.floor(Math.random() * 0xffffff)).toString(16);
@@ -620,6 +735,7 @@ export default {
           throw new Error(e);
         }
       } catch(e) {
+        console.error(e);
         notification.error({
           placement: 'bottomRight',
           message: 'An error occurred while saving.',
@@ -651,6 +767,7 @@ export default {
         const r = ref(db, `users/${this.user.uid}/preferences/`);
         await set(r, this.editor.preferences);
       } catch(e) {
+        console.error(e);
         notification.error({
           placement: 'bottomRight',
           message: 'An error occurred while saving.',
@@ -666,9 +783,24 @@ export default {
         key
       });
     }, 3e3),
-    play() {
+    async play() {
+
+      if (this.openAddTrack || this.openMelodyEditor || this.openSettings) return;
+      
+      if (!this.playing) {
+        for (const track of this.project.tracks) {
+          if (track.melodies.length) {
+            this.loading = true;
+            await loadSynth(track.instrument.identifier);
+            this.loading = false;
+          }
+        }
+        this.playedNotes = [];
+        if (this.editor.cursor >= this.project.bars) this.editor.cursor = 0;
+      } else {
+        stopAll();
+      }
       this.playing = !this.playing;
-      if (this.playing && this.editor.cursor >= this.project.beats) this.editor.cursor = 0;
     }
   },
   components: {
@@ -676,4 +808,5 @@ export default {
     PlusOutlined, LoadingOutlined, CanvasSizer, MelodyEditor
   }
 }
+
 </script>

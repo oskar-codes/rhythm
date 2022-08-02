@@ -11,10 +11,12 @@
     "@stellarogs/tonejs-instruments": "^1.0.0",
     "ant-design-vue": "^3.2.7",
     "firebase": "^9.8.3",
+    "midi-file": "^1.2.3",
     "nexusui": "^2.1.6",
     "tone": "^14.7.77",
     "unplugin-vue-components": "^0.19.6",
     "vue": "^3.2.36",
+    "vue-interactjs": "^0.1.10",
     "vue-router": "^4.0.16"
   },
   "devDependencies": {

@@ -1,3 +1,5 @@
+import { Key } from './classes.js';
+
 function throttle(func, limit) {
   let lastFunc;
   let lastRan;
@@ -23,7 +25,18 @@ const clamp = (val, min, max) => Math.max(Math.min(val, max), min);
 
 const randomKey = _ => (Math.floor(Math.random() * 0xffffff)).toString(16);
 
-export { throttle, clamp, randomKey };
+const delay = time => new Promise(resolve => setTimeout(resolve, time));
+
+const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+const allKeys = (() => {
+  return [new Key('A', 0), new Key('A#', 0), new Key('B', 0),
+    ...[...Array(7)].map((_, i) => 
+      noteNames.map(e => new Key(e,i+1))
+  ).flat(), new Key('C', 8)].reverse();
+})();
+
+export { throttle, clamp, randomKey, delay, noteNames, allKeys };
 
 // Language: javascript
 // Given a video file as a blob, a width and a height, return a new blob of the video cropped to that width and height

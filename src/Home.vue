@@ -33,8 +33,7 @@ main {
 </style>
 
 <script>
-import Title from './components/Title.vue'
-
+import Title from './components/Title.vue';
 export default {
   data() {
     return {}
