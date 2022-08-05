@@ -54,8 +54,8 @@
 
 <script>
 import interact from "interactjs";
-import { allKeys } from '../js/utility.js';
-import { playKey } from '../js/tone-wrapper.js';
+import { allKeys, delay } from '../js/utility.js';
+import { playKey, stopKey } from '../js/tone-wrapper.js';
 
 export default {
   name: "Interact",
@@ -105,8 +105,10 @@ export default {
 
       this.$emit('update:note', this.note);
     },
-    playNote() {
-      playKey(this.note.key);
+    async playNote() {
+      playKey({ key: this.note.key });
+      await delay(100);
+      stopKey({ key: this.note.key });
     }
   },
   mounted() {

@@ -19,26 +19,47 @@ async function loadSynth(identifier) {
   }
 }
 
-function playKey(key, synth) {
+function playKey({ key , synth, start }) {
   if (!synth) {
     if (!lastSynth) return;
     synth = lastSynth;
   }
+  if (!key) return;
+  if (key instanceof Key) key = key.fullName;
+  if (!start && start !== 0) start = Tone.now();
 
   lastSynth = synth;
-  if (key instanceof Key) key = key.fullName;
-  synths[synth].triggerAttack(key);
+  synths[synth].triggerAttack(key, start);
 }
 
-function stopKey(key, synth) {
+function playKeyAndStop({ key , synth, start, duration }) {
   if (!synth) {
     if (!lastSynth) return;
     synth = lastSynth;
   }
+  if (!key) return;
+  if (key instanceof Key) key = key.fullName;
+  if (!start && start !== 0) start = Tone.now();
+  if (!duration) duration = 1/8;
 
   lastSynth = synth;
+  Tone.Transport.scheduleOnce(time => {
+    synths[synth].triggerAttackRelease(key, duration, time);
+  }, start);
+}
+
+function stopKey(key, synth, start) {
+  if (!synth) {
+    if (!lastSynth) return;
+    synth = lastSynth;
+  }
+  if (!key) return;
   if (key instanceof Key) key = key.fullName;
-  synths[synth].triggerRelease(key);
+  if (!start && start !== 0) start = Tone.now();
+
+  lastSynth = synth;
+  synths[synth].triggerRelease(key, start);
+
 }
 
 function setVolume(volume, synth) {
@@ -48,9 +69,11 @@ function setVolume(volume, synth) {
 }
 
 function stopAll() {
+  Tone.Transport.cancel();
+  Tone.Transport.stop();
   for (const synth in synths) {
     synths[synth].releaseAll();
   }
 }
 
-export { loadSynth, playKey, stopKey, stopAll, setVolume }
+export { loadSynth, playKey, playKeyAndStop, stopKey, stopAll, setVolume }

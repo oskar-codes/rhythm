@@ -416,7 +416,7 @@ import { notification } from 'ant-design-vue';
 import { h } from 'vue';
 import { throttle, clamp, matchParent, NOOP } from './js/utility.js';
 import { Midi } from '@tonejs/midi';
-import { loadSynth, playKey, stopKey, stopAll, setVolume } from './js/tone-wrapper.js';
+import { loadSynth, playKeyAndStop, stopKey, stopAll, setVolume } from './js/tone-wrapper.js';
 
 export default {
   data() {
@@ -525,6 +525,9 @@ export default {
         }
       },
       deep: true
+    },
+    'project.bpm'(val) {
+      Tone.Transport.bpm.value = val;
     }
   },
   mounted() {
@@ -619,25 +622,26 @@ export default {
             const advance = (delta / 1000) / (4 / (this.project.bpm / 60));
             this.editor.cursor += advance;
 
-            for (const track of this.project.tracks) {
-              for (const melody of track.melodies) {
-                for (const note of melody.notes) {
-                  if (this.editor.cursor >= note.start + melody.start && this.editor.cursor < melody.start + note.start + note.duration && !this.playedNotes.includes(note.identifier + melody.identifier)) {
-                    playKey(note.key, track.instrument.identifier);
-                    this.playedNotes.push(note.identifier + melody.identifier);
-                  }
+            // for (const track of this.project.tracks) {
+            //   for (const melody of track.melodies) {
+            //     for (const note of melody.notes) {
+            //       if (this.editor.cursor >= note.start + melody.start && this.editor.cursor < melody.start + note.start + note.duration && !this.playedNotes.includes(note.identifier + melody.identifier)) {
+            //         playKeyAndStop(note.key, track.instrument.identifier);
+            //         this.playedNotes.push(note.identifier + melody.identifier);
+            //       }
 
-                  if (this.editor.cursor >= note.start + note.duration + melody.start && this.playedNotes.includes(note.identifier + melody.identifier)) {
-                    stopKey(note.key, track.instrument.identifier);
-                    this.playedNotes.splice(this.playedNotes.indexOf(note.identifier + melody.identifier), 1);
-                  }
-                }
-              }
-            }
+            //       if (this.editor.cursor >= note.start + note.duration + melody.start && this.playedNotes.includes(note.identifier + melody.identifier)) {
+            //         stopKey(note.key, track.instrument.identifier);
+            //         this.playedNotes.splice(this.playedNotes.indexOf(note.identifier + melody.identifier), 1);
+            //       }
+            //     }
+            //   }
+            // }
           }
           if (this.editor.cursor > this.project.bars) {
             this.playing = false;
             this.editor.cursor = this.project.bars;
+            stopAll();
           }
 
           // Scrolling to zoom and pan
@@ -792,27 +796,6 @@ export default {
           start: 0,
           bars: midi.duration * this.project.bpm / (60 * 4)
         }));
-
-        // const reader = new FileReader();
-        // reader.onload = async () => {
-        //   const data = reader.result;
-        //   console.log(data);
-        //   const midi = midiManager.parseMidi(data);
-        //   console.log(midi);
-
-        //   // for (const track of midi.tracks) {
-        //   //   this.project.tracks.push(new Track({
-        //   //     name: track.name,
-        //   //     instrument: new Instrument({
-        //   //       name: track.instrument,
-        //   //       identifier: track.instrument
-        //   //     }),
-        //   //     volume: 100,
-        //   //     melodies: []
-        //   //   }));
-        //   // }
-        // };
-        // reader.readAsArrayBuffer(file);
       };
     },
     saveProject: throttle(async function() {
@@ -888,16 +871,33 @@ export default {
       if (this.openAddTrack || this.openMelodyEditor || this.openSettings) return;
       
       if (!this.playing) {
+        this.loading = true;
         for (const track of this.project.tracks) {
           if (track.melodies.length) {
-            this.loading = true;
             await loadSynth(track.instrument.identifier);
             setVolume(track.volume, track.instrument.identifier)
-            this.loading = false;
           }
         }
-        this.playedNotes = [];
+
+        for (const track of this.project.tracks) {
+          for (const melody of track.melodies) {
+            for (const note of melody.notes) {
+              if (melody.start + note.start < this.editor.cursor) continue;
+              const start = (melody.start + note.start - this.editor.cursor) / this.project.bpm * 60 * 4;
+              const duration = note.duration / this.project.bpm * 60 * 4;
+              playKeyAndStop({
+                key: note.key, 
+                synth: track.instrument.identifier,
+                start,
+                duration
+              });
+            }
+          }
+        }
         if (this.editor.cursor >= this.project.bars) this.editor.cursor = 0;
+
+        this.loading = false;
+        Tone.Transport.start();
       } else {
         stopAll();
       }

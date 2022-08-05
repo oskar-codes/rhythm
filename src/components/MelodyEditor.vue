@@ -162,7 +162,8 @@ import Note from './Note.vue';
 import { Track, Instrument, Melody, Note as N, Key } from '../js/classes.js';
 import { allKeys, delay } from '../js/utility.js';
 import { SimpleCanvas } from '../js/simple-canvas.js';
-import { loadSynth, playKey, stopKey } from '../js/tone-wrapper.js';
+import { loadSynth, playKey, playKeyAndStop, stopKey, stopAll } from '../js/tone-wrapper.js';
+import * as Tone from 'tone';
 
 export default {
   props: ['track', 'melody', 'visible', 'preferences', 'bpm'],
@@ -288,22 +289,11 @@ export default {
           if (this.playing) {
             const advance = (delta * this.bpm) / 240000;
             this.cursor += advance;
-
-            for (const note of this.melody.notes) {
-              if (this.cursor >= note.start && this.cursor < note.start + note.duration && !this.playedNotes.includes(note.identifier)) {
-                this.pressKey(note.key);
-                this.playedNotes.push(note.identifier);
-              }
-
-              if (this.cursor >= note.start + note.duration && this.playedNotes.includes(note.identifier)) {
-                this.releaseKey(note.key);
-                this.playedNotes.splice(this.playedNotes.indexOf(note.identifier), 1);
-              }
-            }
           }
           if (this.cursor > this.melody.bars) {
             this.playing = false;
             this.cursor = this.melody.bars;
+            stopAll();
           }
         }
       });
@@ -327,15 +317,34 @@ export default {
 
       if (!this.visible) return;
 
+      if (!this.playing) {
+        for (const note of this.melody.notes) {
+          if (note.time < this.cursor) continue;
+          const start = (note.start - this.cursor) / this.bpm * 60 * 4;
+          const duration = note.duration / this.bpm * 60 * 4;
+          playKeyAndStop({
+            key: note.key,
+            instrument: this.track.instrument.identifier,
+            start,
+            duration
+          });
+        }
+        Tone.Transport.start();
+      } else {
+        stopAll();
+      }
+
       this.playing = !this.playing;
-      if (!this.playing) this.playedNotes = [];
       if (this.playing && this.cursor >= this.melody.bars) this.cursor = 0;
     },
     pressKey(key, target) {
 
       if (!this.track) return;
 
-      playKey(key.fullName, this.track.instrument.identifier);
+      playKey({
+        key,
+        synth: this.track.instrument.identifier
+      });
       if (target) target.classList.add('active');
     },
     releaseKey(key) {
