@@ -36,7 +36,17 @@ const allKeys = (() => {
   ).flat(), new Key('C', 8)].reverse();
 })();
 
-export { throttle, clamp, randomKey, delay, noteNames, allKeys };
+const formatNumber = val => Math.floor(val*10)/10;
+
+function matchParent(element, selector) {
+  if (element === document) return false;
+  if (element.matches(selector)) return true;
+  return element.parentNode && matchParent(element.parentNode, selector);
+}
+
+function NOOP() {};
+
+export { throttle, clamp, randomKey, delay, noteNames, allKeys, formatNumber, matchParent, NOOP };
 
 // Language: javascript
 // Given a video file as a blob, a width and a height, return a new blob of the video cropped to that width and height

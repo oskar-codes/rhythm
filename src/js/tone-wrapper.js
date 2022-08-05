@@ -5,6 +5,7 @@ import { allKeys } from '../js/utility.js';
 
 
 const synths = {};
+let lastSynth = '';
 
 async function loadSynth(identifier) {
   if (!synths[identifier]) {
@@ -14,19 +15,36 @@ async function loadSynth(identifier) {
       baseUrl: `/samples/${identifier}/`,
     }).toDestination();
     await Tone.loaded();
+    lastSynth = identifier;
   }
 }
 
-function playKey(synth, key) {
-  if (!synths[synth]) return;
+function playKey(key, synth) {
+  if (!synth) {
+    if (!lastSynth) return;
+    synth = lastSynth;
+  }
+
+  lastSynth = synth;
   if (key instanceof Key) key = key.fullName;
   synths[synth].triggerAttack(key);
 }
 
-function stopKey(synth, key) {
-  if (!synths[synth]) return;
+function stopKey(key, synth) {
+  if (!synth) {
+    if (!lastSynth) return;
+    synth = lastSynth;
+  }
+
+  lastSynth = synth;
   if (key instanceof Key) key = key.fullName;
   synths[synth].triggerRelease(key);
+}
+
+function setVolume(volume, synth) {
+  if (!synths[synth]) return;
+  volume = volume - 50;
+  synths[synth].volume.value = volume;
 }
 
 function stopAll() {
@@ -35,4 +53,4 @@ function stopAll() {
   }
 }
 
-export { loadSynth, playKey, stopKey, stopAll }
+export { loadSynth, playKey, stopKey, stopAll, setVolume }

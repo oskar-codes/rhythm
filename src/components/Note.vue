@@ -5,7 +5,7 @@
         Start: {{ note.start }}<br>
         Duration: {{ note.duration }}
       </template>
-      <div :style="style" ref="el" class="interact">
+      <div @mouseup="playNote" :style="style" ref="el" class="interact">
         {{ note.key.fullName }}
       </div>
     </a-tooltip>
@@ -55,7 +55,7 @@
 <script>
 import interact from "interactjs";
 import { allKeys } from '../js/utility.js';
-import { Key } from '../js/classes.js';
+import { playKey } from '../js/tone-wrapper.js';
 
 export default {
   name: "Interact",
@@ -63,11 +63,7 @@ export default {
   emits: ['update:note', 'delete'],
   data: _ => ({
     el: null,
-    y: 0,
-    style: {
-      transform: 'translate(0px, 0px)',
-      width: '200px'
-    }
+    y: 0
   }),
   watch: {
     'scale.x'() {
@@ -85,6 +81,12 @@ export default {
     },
     width() {
       return this.note.duration * this.scale.x;
+    },
+    style() {
+      return {
+        transform: `translate(${this.x}px, ${this.y - this.y % this.scale.y}px)`,
+        width: `${this.width}px`
+      }
     }
   },
   methods: {
@@ -99,43 +101,44 @@ export default {
       if (this.y <= 0) this.y = 0;
       if (this.y >= 87 * this.scale.y) this.y = 87 * this.scale.y;
 
-      this.style.transform = `translate(${this.x}px, ${this.y - this.y % this.scale.y}px)`;
       this.note.key = this.yToKey(this.y);
-      
+
       this.$emit('update:note', this.note);
+    },
+    playNote() {
+      playKey(this.note.key);
     }
   },
   mounted() {
     const that = this;
     this.y = this.keyToY(this.note.key);
-    Object.assign(this.style, {
-      transform: `translate(${this.x}px, ${this.y}px)`,
-      width: this.width + 'px'
-    });
 
     this.el = interact(this.$refs.el);
     this.el.resizable({
       edges: { top: false, left: true, bottom: false, right: true },
       listeners: {
         move: function (event) {
+          const start = that.note.start;
           that.note.start += event.deltaRect.left / that.scale.x;
-          if (that.note.start <= 0) {
-            that.note.start = 0;
+          
+          if (event.edges.left) {
+            if (that.note.start <= 0) {
+              that.note.start = 0;
+            } else {
+              that.note.duration += event.deltaRect.width / that.scale.x;
+            }
           } else {
             that.note.duration += event.deltaRect.width / that.scale.x;
-            if (that.note.duration <= 1/8) {
-              that.note.duration = 1/8;
-            }
-            if (that.note.start + that.note.duration >= that.bars) {
-              that.note.duration = that.bars - that.note.start;
-            }
+          }
+          if (that.note.start + that.note.duration >= that.bars) {
+            that.note.duration = that.bars - that.note.start;
+          }
+          
+          if (that.note.duration <= 1/8) {
+            that.note.duration = 1/8;
+            that.note.start = start;
           }
           that.$emit('update:note', that.note);
-
-          Object.assign(that.style, {
-            width: `${that.width}px`,
-            transform: `translate(${that.x}px, ${that.y - that.y % that.scale.y}px)`
-          });
         }
       }
     });
@@ -151,10 +154,8 @@ export default {
             that.note.start = 0;
           }
           if (that.note.start + that.note.duration >= that.bars) {
-            that.note.duration = that.bars - that.note.start;
+            that.note.start = that.bars - that.note.duration;
           }
-          that.style.transform =
-            `translate(${that.note.start}px, ${that.y - that.y % that.scale.y}px)`;
         },
       }
     });

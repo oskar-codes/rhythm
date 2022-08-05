@@ -43,11 +43,11 @@
 
           <div class="note-elements">
             <Note
-              v-model:note="notes[i]"
+              v-model:note="melody.notes[i]"
               @delete="deleteNote(note)"
               :scale="scale"
-              :bars="bars"
-              v-for="note,i in notes"
+              :bars="melody.bars"
+              v-for="note,i in melody.notes"
               :key="note.identifier"
               :preferences="preferences">
             </Note>
@@ -165,14 +165,13 @@ import { SimpleCanvas } from '../js/simple-canvas.js';
 import { loadSynth, playKey, stopKey } from '../js/tone-wrapper.js';
 
 export default {
-  props: ['track', 'visible', 'preferences', 'bars', 'bpm'],
-  emits: ['update:visible', 'done', 'loading'],
+  props: ['track', 'melody', 'visible', 'preferences', 'bpm'],
+  emits: ['update:visible', 'update:melody', 'done', 'cancel', 'loading'],
   data() {
     return {
       resizeOption: {
         edges: { left: true, right: true, bottom: true, top: true }
       },
-      notes: [],
       playedNotes: [],
       playing: false,
       scale: {
@@ -186,13 +185,12 @@ export default {
   },
   computed: {
     width() {
-      return this.scale.x * this.bars;
+      return this.scale.x * this.melody.bars;
     }
   },
   watch: {
     async track(val) {
       if (!val) return;
-      this.notes = [];
 
       this.$emit('loading', true);
       
@@ -204,6 +202,12 @@ export default {
       handler() {
         document.querySelector('.ant-modal-root').style.setProperty('--y-scale', `${this.scale.y}px`);
       }
+    },
+    melody: {
+      handler() {
+        
+      },
+      deep: true
     },
     visible(val) {
       if (val && this.firstOpened) this.start();
@@ -248,7 +252,7 @@ export default {
 
           const offset = document.querySelector('.container > .content')?.scrollLeft;
           if (offset === undefined) return;
-          for (let i = 1; i <= this.bars; i++) {
+          for (let i = 1; i <= this.melody.bars; i++) {
             const x = i * this.scale.x + 200 - offset;
             if (x + this.scale.x < 0) continue;
             if (x - this.scale.x > width()) break;
@@ -277,7 +281,7 @@ export default {
           }
 
           if (movingCursor) {
-            this.cursor = (sc.mouse()[0] - 200) / this.scale.x;
+            this.cursor = (sc.mouse()[0] + offset - 200) / this.scale.x;
           }
           if (!sc.mousedown()) movingCursor = false;
           if (this.cursor <= 0) this.cursor = 0;
@@ -285,7 +289,7 @@ export default {
             const advance = (delta * this.bpm) / 240000;
             this.cursor += advance;
 
-            for (const note of this.notes) {
+            for (const note of this.melody.notes) {
               if (this.cursor >= note.start && this.cursor < note.start + note.duration && !this.playedNotes.includes(note.identifier)) {
                 this.pressKey(note.key);
                 this.playedNotes.push(note.identifier);
@@ -297,60 +301,60 @@ export default {
               }
             }
           }
-          if (this.cursor > this.bars) {
+          if (this.cursor > this.melody.bars) {
             this.playing = false;
-            this.cursor = this.bars;
+            this.cursor = this.melody.bars;
           }
         }
       });
     },
     handleMelodyCreation() {
-      this.$emit('done', new Melody({
-        notes: this.notes,
-        start: 0,
-        bars: this.bars
-      }));
+      this.$emit('done');
+      this.$emit('melody', this.melody);
       this.reset();
       this.$emit('update:visible', false);
     },
     cancel() {
       this.reset();
+      this.$emit('cancel');
       this.$emit('update:visible', false);
     },
     reset() {
       this.playing = false;
       this.cursor = 0;
-      this.notes = [];
     },
     play() {
+
+      if (!this.visible) return;
+
       this.playing = !this.playing;
       if (!this.playing) this.playedNotes = [];
-      if (this.playing && this.cursor >= this.bars) this.cursor = 0;
+      if (this.playing && this.cursor >= this.melody.bars) this.cursor = 0;
     },
     pressKey(key, target) {
 
       if (!this.track) return;
 
-      playKey(this.track.instrument.identifier, key.fullName);
+      playKey(key.fullName, this.track.instrument.identifier);
       if (target) target.classList.add('active');
     },
     releaseKey(key) {
 
       if (!this.track) return;
-      stopKey(this.track.instrument.identifier, key instanceof Key ? [key.fullName] : allKeys.map(e => e.fullName));
+      stopKey(key instanceof Key ? [key.fullName] : allKeys.map(e => e.fullName), this.track.instrument.identifier);
       
       const active = document.querySelectorAll('.key.active');
       active.forEach(e => e.classList.remove('active'));
     },
     filterNotes(note) {
-      return this.notes.filter(e => e.note.name === note.name && e.note.octave === note.octave);
+      return this.melody.notes.filter(e => e.note.name === note.name && e.note.octave === note.octave);
     },
     async createNote(event, key) {
       const y = document.querySelector('.canvas-wrapper canvas').getBoundingClientRect().y + 50;
       if (event.clientY < y) return;
       if (!event.target.classList.contains('note-track')) return;
       this.pressKey(key);
-      this.notes.push(new N({
+      this.melody.notes.push(new N({
         start: (event.clientX - 200 + document.querySelector('.container > .content').scrollLeft)/this.scale.x,
         duration: 0.25,
         key
@@ -359,8 +363,8 @@ export default {
       this.releaseKey(key);
     },
     deleteNote(note) {
-      const index = this.notes.findIndex(e => e.identifier === note.identifier);
-      this.notes.splice(index, 1);
+      const index = this.melody.notes.findIndex(e => e.identifier === note.identifier);
+      this.melody.notes.splice(index, 1);
     },
   },
   mounted() {

@@ -9,6 +9,7 @@
   "dependencies": {
     "@ant-design/icons-vue": "^6.1.0",
     "@stellarogs/tonejs-instruments": "^1.0.0",
+    "@tonejs/midi": "^2.0.28",
     "ant-design-vue": "^3.2.7",
     "firebase": "^9.8.3",
     "midi-file": "^1.2.3",

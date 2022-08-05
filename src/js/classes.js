@@ -42,6 +42,12 @@ class Instrument {
     this.name = name;
     this.identifier = identifier;
   }
+  copy() {
+    return new Instrument({
+      name: this.name,
+      identifier: this.identifier
+    });
+  }
 }
 
 /**

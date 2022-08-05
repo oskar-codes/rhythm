@@ -1,6 +1,22 @@
 <template>
   <a-dropdown :trigger="['contextmenu']">
-    <div ref="el" :style="style" class="interact"></div>
+    <a-tooltip>
+      <template #title>
+        Start: {{ formatNumber(melody.start) }}<br>
+        Duration: {{ formatNumber(melody.bars) }}<br>
+      </template>
+      <div ref="el" :style="style" class="interact" @dblclick="editMelody">
+        <div v-if="preferences.previewNotes">
+          <div
+            v-for="note in melody.notes"
+            class="note"
+            :data-key="note.key.fullName"
+            :style="noteStyle(note)"
+            :key="note.identifier"
+          ></div>
+        </div>
+      </div>
+    </a-tooltip>
     <template #overlay>
       <a-menu>
         <a-menu-item @click="this.$emit('delete')">Delete</a-menu-item>
@@ -36,6 +52,12 @@
   touch-action: none;
 }
 
+.interact .note {
+  position: absolute;
+  background: yellow;
+  height: 3px;
+}
+
 .interact:hover {
   background: #287985;
 }
@@ -44,32 +66,49 @@
 
 <script>
 import interact from "interactjs";
+import { allKeys, formatNumber } from '../js/utility.js';
 
 export default {
   name: "Interact",
-  props: ['melody', 'scale', 'preferences', 'bars'],
-  emits: ['update:melody', 'delete', 'duplicate'],
+  props: ['melody', 'scale', 'preferences', 'bars', 'offset'],
+  emits: ['update:melody', 'delete', 'duplicate', 'edit'],
   data: _ => ({
     el: null,
-    style: {
-      transform: 'translate(0px, 0px)',
-      width: '200px'
-    }
   }),
+  watch: {
+    scale() {
+
+    }
+  },
   computed: {
     x() {
-      return this.melody.start * this.scale;
+      return this.melody.start * this.scale - this.offset;
     },
     width() {
       return this.melody.bars * this.scale;
+    },
+    style() {
+      return {
+        transform: `translate(${this.x}px, 0px)`,
+        width: `${this.width}px`
+      }
+    }
+  },
+  methods: {
+    noteStyle(note) {
+      return {
+        top: (allKeys.findIndex(e => e.fullName === note.key.fullName) / 88) * 65 + 5 + 'px',
+        left: note.start * this.scale + 'px',
+        width: note.duration * this.scale + 'px'
+      }
+    },
+    formatNumber,
+    editMelody() {
+      this.$emit('edit');
     }
   },
   mounted() {
     const that = this;
-    Object.assign(this.style, {
-      transform: `translateX(${this.x}px)`,
-      width: this.width + 'px'
-    });
 
     this.el = interact(this.$refs.el);
 
@@ -83,7 +122,6 @@ export default {
           if (that.melody.start + that.melody.bars >= that.bars) {
             that.melody.start = that.bars - that.melody.bars;
           }
-          that.style.transform = `translateX(${that.x}px)`;
         },
       }
     });

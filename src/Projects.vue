@@ -37,7 +37,7 @@ if (!projects.value) projects.value = {};
     v-for="project, key in projects"
     :key="key"
     :title="project.name">
-    <template #extra><span>{{ Math.round(project.bars / project.bpm * 60) }}s</span></template>
+    <template #extra><span>{{ Math.round(project.bars / project.bpm * 60 * 4) }}s</span></template>
     
     <div class="icons">
       <a-button type="primary" shape="circle" class="icon green" @click="this.$router.push(`/projects/${key}`)">
@@ -137,6 +137,7 @@ export default {
   },
   computed: {
     editProject() {
+      if (!this.projects[this.editKey]) return {};
       return this.projects[this.editKey];
     }
   },
@@ -145,7 +146,7 @@ export default {
       const r = ref(db, `users/${this.user.uid}/projects`);
       const newRef = await push(r, {
         name: this.newProjectName,
-        beats: 4,
+        bars: 4,
         bpm: 60,
         tracks: []
       });

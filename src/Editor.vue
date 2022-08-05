@@ -57,7 +57,8 @@ if (project.value) {
 const defaultPreferences = {
   autoSave: true,
   invertScroll: false,
-  lockNotes: true
+  lockNotes: true,
+  previewNotes: true
 }
 const editor = reactive(
   {
@@ -133,7 +134,7 @@ const editor = reactive(
                       <a-menu-item @click="addMelody(track, bars)" v-for="bars in [1,2,4,8]" :key="bars">{{ bars }} bars</a-menu-item>
                     </a-sub-menu>
                     <a-sub-menu title="Midi File">
-                      <a-menu-item @click="uploadMidi">Upload File</a-menu-item>
+                      <a-menu-item @click="uploadMidi(track)">Upload File</a-menu-item>
                       <a-menu-item>Record File</a-menu-item>
                     </a-sub-menu>
                   </a-menu>
@@ -156,8 +157,8 @@ const editor = reactive(
 
       </div>
       <a-dropdown :disabled="focusMelodyContext" :trigger="['contextmenu']">
-        <div class="content" ref="content">
-
+        <div class="content" ref="content" :class="{ 'no-tracks': project.tracks.length === 0 }">
+          <h1 v-if="project.tracks.length === 0">Start by <a @click="addTrack">creating a track.</a></h1>
           <div class="tracks-container" ref="tracks">
             <div class="tracks">
               <div class="track-content" v-for="track in project.tracks" :key="track.identifier">
@@ -167,9 +168,11 @@ const editor = reactive(
                 :preferences="editor.preferences"
                 :scale="editor.scale"
                 :bars="project.bars"
+                :offset="editor.x"
                 v-model:melody="track.melodies[i]"
                 @delete="removeMelody(track, i)"
                 @duplicate="duplicateMelody(track, melody)"
+                @edit="editMelody(track, melody)"
                 class="melody" />
               </div>
             </div>
@@ -211,13 +214,14 @@ const editor = reactive(
   </a-modal>
 
   <MelodyEditor 
-    :track="currentTrack"
-    :bars="barsToAdd"
+    :track="melodyEditor.track"
     :bpm="project.bpm"
     :preferences="editor.preferences"
     @loading="setLoading"
-    v-model:visible="openMelodyEditor"
-    @done="handleMelodyCreation"
+    v-model:melody="melodyEditor.melody"
+    v-model:visible="melodyEditor.open"
+    @done="melodyEditor.done"
+    @cancel="melodyEditor.cancel"
   />
 
 
@@ -250,6 +254,10 @@ const editor = reactive(
       <div class="switch">
         <span>Lock movement direction when moving notes</span>
         <a-switch v-model:checked="editor.preferences.lockNotes"/>
+      </div>
+      <div class="switch">
+        <span>Preview notes in editor</span>
+        <a-switch v-model:checked="editor.preferences.previewNotes"/>
       </div>
       <a-button type="primary" @click="saveEditorChanges">Save Editor Settings</a-button>
     </a-space>
@@ -361,6 +369,11 @@ section.ant-layout {
   flex: 1;
   position: relative;
 }
+.editor .content.no-tracks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .editor .content canvas {
   position: absolute;
   top: 0; left: 0;
@@ -401,23 +414,9 @@ import { SimpleCanvas } from './js/simple-canvas.js';
 import * as Tone from 'tone';
 import { notification } from 'ant-design-vue';
 import { h } from 'vue';
-import { throttle, clamp } from './js/utility.js';
-import * as midiManager from 'midi-file';
-import { loadSynth, playKey, stopKey, stopAll } from './js/tone-wrapper.js';
-
-(async () => {
-  
-  // Read MIDI file into a buffer
-  const response = await fetch('../example.mid');
-  const input = await response.arrayBuffer();
-
-  console.log(input);
-
-  // Convert buffer to midi object
-  const parsed = midiManager.parseMidi(input);
-
-  console.log(parsed);
-});
+import { throttle, clamp, matchParent, NOOP } from './js/utility.js';
+import { Midi } from '@tonejs/midi';
+import { loadSynth, playKey, stopKey, stopAll, setVolume } from './js/tone-wrapper.js';
 
 export default {
   data() {
@@ -435,6 +434,13 @@ export default {
       playedNotes: [],
       focusMelodyContext: false,
       barsToAdd: 1,
+      melodyEditor: {
+        done: NOOP,
+        cancel: NOOP,
+        track: null,
+        melody: null,
+        open: false
+      },
       newTrack: {
         name: '',
         instrument: null,
@@ -617,12 +623,12 @@ export default {
               for (const melody of track.melodies) {
                 for (const note of melody.notes) {
                   if (this.editor.cursor >= note.start + melody.start && this.editor.cursor < melody.start + note.start + note.duration && !this.playedNotes.includes(note.identifier + melody.identifier)) {
-                    playKey(track.instrument.identifier, note.key);
+                    playKey(note.key, track.instrument.identifier);
                     this.playedNotes.push(note.identifier + melody.identifier);
                   }
 
                   if (this.editor.cursor >= note.start + note.duration + melody.start && this.playedNotes.includes(note.identifier + melody.identifier)) {
-                    stopKey(track.instrument.identifier, note.key);
+                    stopKey(note.key, track.instrument.identifier);
                     this.playedNotes.splice(this.playedNotes.indexOf(note.identifier + melody.identifier), 1);
                   }
                 }
@@ -660,7 +666,7 @@ export default {
         });
 
         window.addEventListener('mousemove', e => {
-          this.focusMelodyContext = e.target?.classList?.contains('melody');
+          this.focusMelodyContext = matchParent(e.target, '.melody');
         });
       });
     },
@@ -695,10 +701,28 @@ export default {
     removeTrack(i) {
       this.project.tracks.splice(i, 1);
     },
-    addMelody(track, bars) {
-      this.currentTrack = track;
-      this.barsToAdd = bars;
-      this.openMelodyEditor = true;
+    async addMelody(track, bars) {
+      
+      this.melodyEditor.melody = new M({
+        notes: [],
+        start: 0,
+        bars
+      });
+      this.melodyEditor.track = track;
+      this.melodyEditor.open = true;
+
+      try {
+        await new Promise((resolve, reject) => {
+          this.melodyEditor.done = resolve;
+          this.melodyEditor.cancel = reject;
+        });
+        track.melodies.push(this.melodyEditor.melody);
+      } catch(e) {
+        if (e !== undefined) console.error(e);
+      }
+
+      this.melodyEditor.done = NOOP;
+      this.melodyEditor.cancel = NOOP;
     },
     removeMelody(track, i) {
       track.melodies.splice(i, 1);
@@ -708,12 +732,88 @@ export default {
       newMelody.start += melody.bars;
       track.melodies.push(newMelody);
     },
-    uploadMidi() {
+    async editMelody(track, melody) {
+      this.melodyEditor.open = true;
+      this.melodyEditor.melody = melody;
+      this.melodyEditor.track = track;
 
+      try {
+        await new Promise((resolve, reject) => {
+          this.melodyEditor.done = resolve;
+          this.melodyEditor.cancel = reject;
+        });
+      } catch(e) {
+        if (e !== undefined) console.error(e);
+      }
+      this.melodyEditor.done = NOOP;
+      this.melodyEditor.cancel = NOOP;
     },
-    handleMelodyCreation(melody) {
-      if (melody.notes.length === 0) return;
-      this.currentTrack.melodies.push(melody);
+    uploadMidi(track) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.mid';
+
+      input.click();
+
+      input.onchange = async () => {
+        const file = input.files[0];
+        
+        if (file.type !== 'audio/mid') {
+          notification.error({
+            placement: 'bottomRight',
+            message: 'The uploaded file is not a MIDI file.',
+            duration: 2
+          });
+          return;
+        }
+
+        const url = URL.createObjectURL(file);
+        const midi = await Midi.fromUrl(url);
+
+        console.log(midi.header);
+
+        const bpm = midi.header.tempos[0].bpm;
+
+        const notes = [];
+        for (const track of midi.tracks) {
+          for (const note of track.notes) {
+            notes.push(new Note({
+              key: new Key(note.pitch, note.octave),
+              start: note.time * this.project.bpm / (60 * 4) * this.project.bpm / bpm,
+              duration: note.duration * this.project.bpm / (60 * 4) * this.project.bpm / bpm,
+            }));
+          }
+        }
+        
+        console.log(notes);
+
+        track.melodies.push(new M({
+          notes,
+          start: 0,
+          bars: midi.duration * this.project.bpm / (60 * 4)
+        }));
+
+        // const reader = new FileReader();
+        // reader.onload = async () => {
+        //   const data = reader.result;
+        //   console.log(data);
+        //   const midi = midiManager.parseMidi(data);
+        //   console.log(midi);
+
+        //   // for (const track of midi.tracks) {
+        //   //   this.project.tracks.push(new Track({
+        //   //     name: track.name,
+        //   //     instrument: new Instrument({
+        //   //       name: track.instrument,
+        //   //       identifier: track.instrument
+        //   //     }),
+        //   //     volume: 100,
+        //   //     melodies: []
+        //   //   }));
+        //   // }
+        // };
+        // reader.readAsArrayBuffer(file);
+      };
     },
     saveProject: throttle(async function() {
       const key = (Math.floor(Math.random() * 0xffffff)).toString(16);
@@ -792,6 +892,7 @@ export default {
           if (track.melodies.length) {
             this.loading = true;
             await loadSynth(track.instrument.identifier);
+            setVolume(track.volume, track.instrument.identifier)
             this.loading = false;
           }
         }
