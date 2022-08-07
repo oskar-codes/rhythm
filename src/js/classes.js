@@ -57,13 +57,15 @@ class Instrument {
 class Melody {
   /**
    * @param {Note[]} notes
+   * @param {Effect{}} effects
    * @param {Number} start - in bars
    * @param {Number} bars
    */
-  constructor({ notes, start, bars }) {
-    this.notes = notes;
-    this.start = start;
-    this.bars = bars;
+  constructor({ notes, effects, start, bars }) {
+    this.notes = notes ?? [];
+    this.effects = effects ?? [];
+    this.start = start ?? 0;
+    this.bars = bars ?? 4;
   }
   get identifier() {
     return this.notes.map(e => e.identifier).join('') + this.start + this.bars;
@@ -72,7 +74,8 @@ class Melody {
     return new Melody({
       start: this.start,
       bars: this.bars,
-      notes: this.notes.map(e => e.copy())
+      notes: this.notes.map(e => e.copy()),
+      effects: this.effects.map(e => e.copy())
     })
   }
 }
@@ -87,10 +90,11 @@ class Note {
    * @param {Number} start - in bars
    * @param {Number} duration - in bars
    */
-  constructor({ key, start, duration }) {
+  constructor({ key, start, duration, velocity }) {
     this.key = key;
     this.start = start;
     this.duration = duration;
+    this.velocity = velocity ?? 1;
   }
   get identifier() {
     return this.key.fullName + this.start.toString() + this.duration.toString();
@@ -126,4 +130,47 @@ class Key {
   }
 }
 
-export { Track, Instrument, Melody, Note, Key };
+/**
+ * Class representing an effect
+ * @class
+ */
+
+class Effect {
+  /**
+   * @param {String} type
+   * @param {ControlPoint[]} controlPoints
+   */
+  constructor({ type, controlPoints }) {
+    this.type = type;
+    this.controlPoints = controlPoints ?? [];
+  }
+  copy() {
+    return new Effect({
+      type: this.type,
+      controlPoints: this.controlPoints.map(e => e.copy())
+    })
+  }
+}
+
+/**
+ * Class representing an effect control point
+ * @class
+ */
+class ControlPoint {
+  /**
+   * @param {Number} start - in bars
+   * @param {Number | Boolean} value
+   */
+  constructor({ start, value }) {
+    this.start = start;
+    this.value = value;
+  }
+  copy() {
+    return new ControlPoint({
+      start: this.start,
+      value: this.value
+    })
+  }
+}
+
+export { Track, Instrument, Melody, Note, Key, Effect, ControlPoint };

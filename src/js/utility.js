@@ -1,4 +1,5 @@
 import { Key } from './classes.js';
+import * as Tone from 'tone';
 
 function throttle(func, limit) {
   let lastFunc;
@@ -46,7 +47,26 @@ function matchParent(element, selector) {
 
 function NOOP() {};
 
-export { throttle, clamp, randomKey, delay, noteNames, allKeys, formatNumber, matchParent, NOOP };
+
+/**
+ *        seconds * bpm
+ * bars = -------------
+ *           4 * 60
+ */
+function secondsToBars(seconds) {
+  return seconds * Tone.Transport.bpm.value / (4 * 60);
+}
+
+/**
+ *           bars * 4 * 60
+ * seconds = -------------
+ *               bpm
+ */
+function barsToSeconds(bars) {
+  return bars * 4 / Tone.Transport.bpm.value * 60; 
+}
+
+export { throttle, clamp, randomKey, delay, noteNames, allKeys, formatNumber, matchParent, NOOP, secondsToBars, barsToSeconds };
 
 // Language: javascript
 // Given a video file as a blob, a width and a height, return a new blob of the video cropped to that width and height

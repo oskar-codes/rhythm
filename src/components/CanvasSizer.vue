@@ -4,7 +4,7 @@
 
 <script>
 export default {
-  props: ['width', 'height', 'style'],
+  props: ['width', 'height', 'style', 'type'],
   data() {
     return {
       outputWidth: 100,
@@ -19,14 +19,14 @@ export default {
     setDimensions() {
       if (String(this.width).includes('%')) {
         const w = Number(this.width.replace('%', ''));
-        this.outputWidth = this.$el.parentNode.scrollWidth * (w / 100);
+        this.outputWidth = this.$el.parentNode[(this.type ?? 'scroll') + 'Width'] * (w / 100);
       } else {
         this.outputWidth = this.width;
       }
 
       if (String(this.height).includes('%')) {
         const h = Number(this.height.replace('%', ''));
-        this.outputHeight = this.$el.parentNode.scrollHeight * (h / 100);
+        this.outputHeight = this.$el.parentNode[(this.type ?? 'scroll') + 'Height'] * (h / 100);
       } else {
         this.outputHeight = this.height;
       }

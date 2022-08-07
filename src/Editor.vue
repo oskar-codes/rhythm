@@ -4,7 +4,7 @@ import { ref, get, set } from 'firebase/database';
 import { auth, db } from './js/cloud.js';
 import { useRouter } from 'vue-router';
 import { ref as reactive } from 'vue';
-import { Track, Instrument, Melody as M, Key, Note } from './js/classes.js';
+import { Track, Instrument, Melody as M, Effect, Key, Note, ControlPoint } from './js/classes.js';
 const router = useRouter();
 
 const user = reactive(await new Promise(resolve => {
@@ -22,7 +22,6 @@ const project = reactive(
 
 if (project.value) {
   if (!project.value.tracks) project.value.tracks = [];
-  
   project.value.tracks = project.value.tracks.map(track => {
     if (!track.melodies) track.melodies = [];
 
@@ -33,16 +32,27 @@ if (project.value) {
         instrument: new Instrument({...track.instrument}),
         melodies: track.melodies.map(melody => {
           if (!melody.notes) melody.notes = [];
+          if (!melody.effects) melody.effects = {};
+
+          Object.keys(melody.effects).map((key, index) => {
+            const effect = melody.effects[key];
+            if (!effect.controlPoints) effect.controlPoints = [];
+            melody.effects[key] = new Effect({
+              type: effect.type,
+              controlPoints: effect.controlPoints.map(point => new ControlPoint({...point}))
+            });
+          });
           return new M({
             notes: melody.notes.map(note => new Note({
               key: new Key(note.key.name, note.key.octave),
               start: note.start,
-              duration: note.duration
+              duration: note.duration,
+              velocity: note.velocity
             })),
             start: melody.start,
-            bars: melody.bars
-          }
-          );
+            bars: melody.bars,
+            effects: melody.effects
+          });
         })
       })
   });
@@ -414,7 +424,7 @@ import { SimpleCanvas } from './js/simple-canvas.js';
 import * as Tone from 'tone';
 import { notification } from 'ant-design-vue';
 import { h } from 'vue';
-import { throttle, clamp, matchParent, NOOP } from './js/utility.js';
+import { throttle, clamp, NOOP, delay, barsToSeconds, secondsToBars } from './js/utility.js';
 import { Midi } from '@tonejs/midi';
 import { loadSynth, playKeyAndStop, stopKey, stopAll, setVolume } from './js/tone-wrapper.js';
 
@@ -604,6 +614,7 @@ export default {
             if (sc.mouse()[1] <= 50 && sc.mouse()[1] > 0 && sc.mouse()[0] > 0) {
               moving = MOVES.cursor;
               this.playing = false;
+              stopAll();
             }
           }
           if (!sc.mousedown()) moving = MOVES.none;
@@ -621,22 +632,6 @@ export default {
           if (this.playing) {
             const advance = (delta / 1000) / (4 / (this.project.bpm / 60));
             this.editor.cursor += advance;
-
-            // for (const track of this.project.tracks) {
-            //   for (const melody of track.melodies) {
-            //     for (const note of melody.notes) {
-            //       if (this.editor.cursor >= note.start + melody.start && this.editor.cursor < melody.start + note.start + note.duration && !this.playedNotes.includes(note.identifier + melody.identifier)) {
-            //         playKeyAndStop(note.key, track.instrument.identifier);
-            //         this.playedNotes.push(note.identifier + melody.identifier);
-            //       }
-
-            //       if (this.editor.cursor >= note.start + note.duration + melody.start && this.playedNotes.includes(note.identifier + melody.identifier)) {
-            //         stopKey(note.key, track.instrument.identifier);
-            //         this.playedNotes.splice(this.playedNotes.indexOf(note.identifier + melody.identifier), 1);
-            //       }
-            //     }
-            //   }
-            // }
           }
           if (this.editor.cursor > this.project.bars) {
             this.playing = false;
@@ -670,7 +665,7 @@ export default {
         });
 
         window.addEventListener('mousemove', e => {
-          this.focusMelodyContext = matchParent(e.target, '.melody');
+          this.focusMelodyContext = e.target?.classList.contains('melody') || e.target.parentNode?.classList.contains('melody');
         });
       });
     },
@@ -737,6 +732,10 @@ export default {
       track.melodies.push(newMelody);
     },
     async editMelody(track, melody) {
+
+      this.loading = true;
+      await delay(100);
+
       this.melodyEditor.open = true;
       this.melodyEditor.melody = melody;
       this.melodyEditor.track = track;
@@ -774,27 +773,42 @@ export default {
         const url = URL.createObjectURL(file);
         const midi = await Midi.fromUrl(url);
 
-        console.log(midi.header);
-
-        const bpm = midi.header.tempos[0].bpm;
-
         const notes = [];
+        const effects = {};
         for (const track of midi.tracks) {
           for (const note of track.notes) {
             notes.push(new Note({
               key: new Key(note.pitch, note.octave),
-              start: note.time * this.project.bpm / (60 * 4) * this.project.bpm / bpm,
-              duration: note.duration * this.project.bpm / (60 * 4) * this.project.bpm / bpm,
+              start: secondsToBars(note.time),
+              duration: secondsToBars(note.duration),
+              velocity: note.velocity,
             }));
           }
+
+          if (track.controlChanges && track.controlChanges[64]) {
+            for (const controlChange of track.controlChanges[64]) {
+              if (controlChange.name !== 'sustain') continue;
+
+              if (!effects.sustain) {
+                effects.sustain = new Effect({
+                  type: 'sustain',
+                  controlPoints: []
+                });
+              }
+
+              effects.sustain.controlPoints.push(new ControlPoint({
+                start: secondsToBars(controlChange.time),
+                value: !!controlChange.value
+              }));
+            }
+          }
         }
-        
-        console.log(notes);
 
         track.melodies.push(new M({
           notes,
           start: 0,
-          bars: midi.duration * this.project.bpm / (60 * 4)
+          bars: secondsToBars(midi.duration),
+          effects
         }));
       };
     },
@@ -868,6 +882,7 @@ export default {
     }, 3e3),
     async play() {
 
+      Tone.Transport.bpm.value = this.project.bpm;
       if (this.openAddTrack || this.openMelodyEditor || this.openSettings) return;
       
       if (!this.playing) {
@@ -883,13 +898,15 @@ export default {
           for (const melody of track.melodies) {
             for (const note of melody.notes) {
               if (melody.start + note.start < this.editor.cursor) continue;
-              const start = (melody.start + note.start - this.editor.cursor) / this.project.bpm * 60 * 4;
-              const duration = note.duration / this.project.bpm * 60 * 4;
+              const start = barsToSeconds(melody.start + note.start - this.editor.cursor);
+              const duration = barsToSeconds(note.duration);
               playKeyAndStop({
-                key: note.key, 
+                key: note.key,
+                velocity: note.velocity,
                 synth: track.instrument.identifier,
                 start,
-                duration
+                duration,
+                effects: melody.effects
               });
             }
           }

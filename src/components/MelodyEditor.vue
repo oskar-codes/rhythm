@@ -278,6 +278,7 @@ export default {
             if (sc.mouse()[1] <= 50 && sc.mouse()[1] > 0 && sc.mouse()[0] > 200) {
               movingCursor = true;
               this.playing = false;
+              stopAll();
             }
           }
 
@@ -312,6 +313,7 @@ export default {
     reset() {
       this.playing = false;
       this.cursor = 0;
+      stopAll();
     },
     play() {
 
@@ -324,6 +326,7 @@ export default {
           const duration = note.duration / this.bpm * 60 * 4;
           playKeyAndStop({
             key: note.key,
+            velocity: note.velocity,
             instrument: this.track.instrument.identifier,
             start,
             duration
