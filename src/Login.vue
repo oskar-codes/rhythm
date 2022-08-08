@@ -1,3 +1,7 @@
+<script setup>
+import { getBase } from './js/url-manager.js';
+</script>
+
 <template>
 
   <main>
@@ -33,7 +37,7 @@
       <p style="color: red;" v-if="formState.error">{{ formState.error }}</p>
     </a-form>
 
-    <p>Don't have an account? <a href="/create-account">Create one.</a></p>
+    <p>Don't have an account? <router-link :to="getBase() + '/create-account'">Create one.</router-link></p>
   </main>
 
 </template>
@@ -65,7 +69,7 @@ export default {
       this.formState.error = '';
       signInWithEmailAndPassword(auth, this.formState.email, this.formState.password)
         .then(_ => {
-          this.$router.push('/projects');
+          this.$router.push(getBase() + '/projects');
         })
         .catch((error) => {
           this.formState.error = error.message;

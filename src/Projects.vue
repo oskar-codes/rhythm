@@ -2,16 +2,18 @@
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth, db } from './js/cloud.js';
 import { useRouter } from 'vue-router';
-import { ref as reactive } from 'vue';
+import { ref } from 'vue';
+import { ref as reference, get, push, remove, set } from 'firebase/database';
+import { getBase } from './js/url-manager.js';
 
-const user = reactive(await new Promise(resolve => {
+const user = ref(await new Promise(resolve => {
   onAuthStateChanged(auth, resolve);
 }));
-if (!user.value) useRouter().push('/login');
+if (!user.value) useRouter().push(getBase() + '/login');
 
-const projects = reactive(
+const projects = ref(
   (await get(
-    ref(db, `users/${user.value.uid}/projects/`)
+    reference(db, `users/${user.value.uid}/projects/`)
   )).val()
 );
 if (!projects.value) projects.value = {};
@@ -21,7 +23,7 @@ if (!projects.value) projects.value = {};
   <a-page-header
     style="border: 1px solid rgb(235, 237, 240)"
     title="Projects"
-    @back="$router.push('/')"
+    @back="$router.push(getBase() + '/')"
   >
     <template #extra>
       <a-button @click="logOut">Log Out</a-button>
@@ -40,7 +42,7 @@ if (!projects.value) projects.value = {};
     <template #extra><span>{{ Math.round(project.bars / project.bpm * 60 * 4) }}s</span></template>
     
     <div class="icons">
-      <a-button type="primary" shape="circle" class="icon green" @click="this.$router.push(`/projects/${key}`)">
+      <a-button type="primary" shape="circle" class="icon green" @click="$router.push(getBase() + `/projects/${key}`)">
         <template #icon><EditOutlined /></template>
       </a-button>
       <a-button type="primary" shape="circle" class="icon grey" @click="editKey = key; openProjectOptions = true;">
@@ -120,7 +122,6 @@ if (!projects.value) projects.value = {};
 
 <script>
 import { EditOutlined, SettingOutlined, DeleteOutlined, PlusOutlined, LoadingOutlined } from '@ant-design/icons-vue';
-import { ref, get, push, remove, set } from 'firebase/database';
 import { notification } from 'ant-design-vue';
 import { throttle, randomKey } from './js/utility.js';
 import { h } from 'vue';
@@ -137,33 +138,32 @@ export default {
   },
   computed: {
     editProject() {
-      if (!this.projects[this.editKey]) return {};
-      return this.projects[this.editKey];
-    }
+      return this.projects[this.editKey] ?? {};
+    },
   },
   methods: {
     async createProject() {
-      const r = ref(db, `users/${this.user.uid}/projects`);
+      const r = reference(db, `users/${this.user.uid}/projects`);
       const newRef = await push(r, {
         name: this.newProjectName,
         bars: 4,
         bpm: 60,
         tracks: []
       });
-      this.$router.push(`/projects/${newRef.key}`);
+      this.$router.push(getBase() + `/projects/${newRef.key}`);
     },
     async logOut() {
       await signOut(auth);
-      this.$router.push('/');
+      this.$router.push(getBase() + '/');
     },
     async confirmDelete() {
-      const r = ref(db, `users/${this.user.uid}/projects/${this.editKey}`);
+      const r = reference(db, `users/${this.user.uid}/projects/${this.editKey}`);
       await remove(r);
       delete this.projects[this.editKey];
       this.openDeleteProject = false;
     },
     saveChanges: throttle(async function() {
-      const r = ref(db, `users/${this.user.uid}/projects/${this.editKey}`);
+      const r = reference(db, `users/${this.user.uid}/projects/${this.editKey}`);
       const key = randomKey();
       notification.open({
         placement: 'bottomRight',
@@ -195,11 +195,11 @@ export default {
   mounted() {
     onAuthStateChanged(auth, user => {
       if (user) {
-        if (this.user && user.uid != this.user.uid) this.$router.push('/projects');
+        if (this.user && user.uid != this.user.uid) this.$router.push(getBase() + '/projects');
         this.user = user;
       } else {
         this.user = null;
-        this.$router.push('/');
+        this.$router.push(getBase() + '/');
       }
     });
   },

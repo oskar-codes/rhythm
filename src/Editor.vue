@@ -1,95 +1,10 @@
-<script setup>
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref, get, set } from 'firebase/database';
-import { auth, db } from './js/cloud.js';
-import { useRouter } from 'vue-router';
-import { ref as reactive } from 'vue';
-import { Track, Instrument, Melody as M, Effect, Key, Note, ControlPoint } from './js/classes.js';
-const router = useRouter();
-
-const user = reactive(await new Promise(resolve => {
-  onAuthStateChanged(auth, resolve);
-}));
-
-if (!user.value) router.push('/login');
-const id = router.currentRoute.value.params.pathMatch[0];
-
-const project = reactive(
-  (await get(
-    ref(db, `users/${user.value.uid}/projects/${id}`)
-  )).val()
-);
-
-if (project.value) {
-  if (!project.value.tracks) project.value.tracks = [];
-  project.value.tracks = project.value.tracks.map(track => {
-    if (!track.melodies) track.melodies = [];
-
-    return new Track(
-      {
-        name: track.name,
-        volume: track.volume,
-        instrument: new Instrument({...track.instrument}),
-        melodies: track.melodies.map(melody => {
-          if (!melody.notes) melody.notes = [];
-          if (!melody.effects) melody.effects = {};
-
-          Object.keys(melody.effects).map((key, index) => {
-            const effect = melody.effects[key];
-            if (!effect.controlPoints) effect.controlPoints = [];
-            melody.effects[key] = new Effect({
-              type: effect.type,
-              controlPoints: effect.controlPoints.map(point => new ControlPoint({...point}))
-            });
-          });
-          return new M({
-            notes: melody.notes.map(note => new Note({
-              key: new Key(note.key.name, note.key.octave),
-              start: note.start,
-              duration: note.duration,
-              velocity: note.velocity
-            })),
-            start: melody.start,
-            bars: melody.bars,
-            effects: melody.effects
-          });
-        })
-      })
-  });
-
-  for (const track of project.value.tracks) {
-    if (!track.melodies) track.melodies = [];
-  }
-} else {
-  router.push('/projects');
-}
-
-const defaultPreferences = {
-  autoSave: true,
-  invertScroll: false,
-  lockNotes: true,
-  previewNotes: true
-}
-const editor = reactive(
-  {
-    preferences: (await get(
-      ref(db, `users/${user.value.uid}/preferences/`)
-    )).val() ?? defaultPreferences,
-    cursor: 0,
-    scale: 100,
-    x: 0,
-    y: 0
-  }
-);
-</script>
-
 <template>
   <main>
 
     <a-page-header
       style="border: 1px solid rgb(235, 237, 240)"
       :title="project.name"
-      @back="$router.push('/projects')"
+      @back="$router.push(base + '/projects')"
     >
       <template #extra>
         <a-button @click="saveProject">Save Project</a-button>
@@ -167,7 +82,7 @@ const editor = reactive(
 
       </div>
       <a-dropdown :disabled="focusMelodyContext" :trigger="['contextmenu']">
-        <div class="content" ref="content" :class="{ 'no-tracks': project.tracks.length === 0 }">
+        <div class="content" ref="content" :class="{ 'no-tracks': log(project) && project.tracks?.length === 0 }">
           <h1 v-if="project.tracks.length === 0">Start by <a @click="addTrack">creating a track.</a></h1>
           <div class="tracks-container" ref="tracks">
             <div class="tracks">
@@ -188,7 +103,7 @@ const editor = reactive(
             </div>
           </div>
 
-          <CanvasSizer width="100%" height="100%" ref="tracksCanvas"></CanvasSizer>
+          <CanvasSizer width="100%" height="100%" class="tracks-canvas"></CanvasSizer>
 
         </div>
 
@@ -419,20 +334,26 @@ section.ant-layout {
 import { DeleteOutlined, CaretRightOutlined, PauseOutlined, PlusOutlined, LoadingOutlined, SettingOutlined } from '@ant-design/icons-vue';
 import CanvasSizer from './components/CanvasSizer.vue';
 import MelodyEditor from './components/MelodyEditor.vue';
-import Melody from './components/Melody.vue';
 import { SimpleCanvas } from './js/simple-canvas.js';
-import * as Tone from 'tone';
-import { notification } from 'ant-design-vue';
-import { h } from 'vue';
+import { loadSynth, playKeyAndStop, stopAll, setVolume } from './js/tone-wrapper.js';
 import { throttle, clamp, NOOP, delay, barsToSeconds, secondsToBars } from './js/utility.js';
+import { Track, Instrument, Melody as M, Effect, Key, Note, ControlPoint } from './js/classes.js';
+import { auth, db } from './js/cloud.js';
+import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
-import { loadSynth, playKeyAndStop, stopKey, stopAll, setVolume } from './js/tone-wrapper.js';
+import { notification } from 'ant-design-vue';
+import { h, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { onAuthStateChanged } from "firebase/auth";
+import { ref as reference, get, set } from 'firebase/database';
+import { getBase } from './js/url-manager.js';
 
 export default {
   data() {
     const id = this.$router.currentRoute.value.params.pathMatch[0];
     return {
       id,
+      base: getBase(),
       openMelodyEditor: false,
       currentTrack: null,
       octave: [0,1,0,1,0,0,1,0,1,0,1,0],
@@ -527,12 +448,105 @@ export default {
       }
     }
   },
+  async setup() {
+
+    const test = ref(0);
+    // return { editor: {preferences: {invertScroll:false}}, project: {tracks:[]}};
+    const router = useRouter();
+
+    const userResponse = await new Promise(resolve => {
+      onAuthStateChanged(auth, resolve);
+    });
+
+    const user = ref(userResponse);
+    if (!user.value) router.push(getBase() + '/login');
+    
+    const id = router.currentRoute.value.params.pathMatch[0];
+    
+    const projectResponse = (await get(
+      reference(db, `users/${user.value.uid}/projects/${id}`)
+    )).val();
+
+    const project = ref(projectResponse);
+
+    if (!!project.value) {
+      if (!project.value.tracks) project.value.tracks = [];
+      project.value.tracks = project.value.tracks.map(track => {
+        if (!track.melodies) track.melodies = [];
+
+        return new Track(
+          {
+            name: track.name,
+            volume: track.volume,
+            instrument: new Instrument({...track.instrument}),
+            melodies: track.melodies.map(melody => {
+              if (!melody.notes) melody.notes = [];
+              if (!melody.effects) melody.effects = {};
+
+              Object.keys(melody.effects).map((key, index) => {
+                const effect = melody.effects[key];
+                if (!effect.controlPoints) effect.controlPoints = [];
+                melody.effects[key] = new Effect({
+                  type: effect.type,
+                  controlPoints: effect.controlPoints.map(point => new ControlPoint({...point}))
+                });
+              });
+              return new M({
+                notes: melody.notes.map(note => new Note({
+                  key: new Key(note.key.name, note.key.octave),
+                  start: note.start,
+                  duration: note.duration,
+                  velocity: note.velocity
+                })),
+                start: melody.start,
+                bars: melody.bars,
+                effects: melody.effects
+              });
+            })
+          })
+      });
+    } else {
+      router.push(getBase() + '/projects');
+    }
+
+    const defaultPreferences = {
+      autoSave: true,
+      invertScroll: false,
+      lockNotes: true,
+      previewNotes: true
+    }
+
+    const preferencesResponse = (await get(
+      reference(db, `users/${user.uid}/preferences/`)
+    )).val();
+
+    const editor = ref(
+      {
+        preferences: preferencesResponse ?? defaultPreferences,
+        cursor: 0,
+        scale: 100,
+        x: 0,
+        y: 0
+      }
+    );
+
+    return { user, project, editor }
+  },
   watch: {
     project: {
       handler() {
+        console.log('######### THIS.PROJECT #########');
+        console.log(this.project);
         if (this.editor.preferences.autoSave && !this.openSettings) {
           this.saveProject();
         }
+      },
+      deep: true
+    },
+    editor: {
+      handler() {
+        console.log('######### THIS.EDITOR #########');
+        console.log(this.editor);
       },
       deep: true
     },
@@ -542,15 +556,18 @@ export default {
   },
   mounted() {
 
+    console.log('######### THIS #########');
+    console.log(this);
+
     this.start();
 
     onAuthStateChanged(auth, user => {
       if (user) {
-        if (this.user && user.uid != this.user.uid) this.$router.push('/projects');
+        if (this.user && user.uid != this.user.uid) this.$router.push(getBase() + '/projects');
         this.user = user;
       } else {
         this.user = null;
-        this.$router.push('/');
+        this.$router.push(getBase() + '/');
       }
     });
   },
@@ -558,10 +575,14 @@ export default {
     setLoading(val) {
       this.loading = val;
     },
+    log() {
+      console.log(...arguments);
+      return true;
+    },
     start() {
       /*** TRACKS CANVAS ***/
       this.$nextTick(() => {
-        const canvas = this.$refs.tracksCanvas.$el;
+        const canvas = document.querySelector('.tracks-canvas');
         const ctx = canvas.getContext('2d');
         const sc = SimpleCanvas.setupCanvas(ctx);
 
@@ -827,7 +848,7 @@ export default {
         if (!this.user) throw new Error('No user logon.');
         console.log('[Firebase] Saving project...');
         try {
-          await set(ref(db, `users/${this.user.uid}/projects/${this.id}`), this.project);
+          await set(reference(db, `users/${this.user.uid}/projects/${this.id}`), this.project);
         } catch(e) {
           throw new Error(e);
         }
@@ -861,7 +882,7 @@ export default {
       });
       try {
         console.log('[Firebase] Saving user preferences...');
-        const r = ref(db, `users/${this.user.uid}/preferences/`);
+        const r = reference(db, `users/${this.user.uid}/preferences/`);
         await set(r, this.editor.preferences);
       } catch(e) {
         console.error(e);

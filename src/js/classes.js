@@ -1,3 +1,40 @@
+/*
+
+Project: {
+  name: String,
+  bars: Number,
+  bpm: Number,
+  tracks: [{
+    name: String,
+    volume: Number,
+    instrument: {
+      name: String,
+      identifier: String
+    },
+    melodies: [{
+      start: Number,
+      bars: Number,
+      notes: [{
+        start: Number,
+        duration: Number,
+        key: {
+          name: String,
+          octave: Number
+        }
+      }]
+    }],
+    effects: [{
+      type: String,
+      controlPoints: [{
+        start: Number,
+        value: Number | Boolean
+      }]
+    }]
+  }]
+}
+
+*/
+
 /**
  * Class representing a Track
  * @class

@@ -9,9 +9,10 @@ import CreateAccount from '../CreateAccount.vue';
 import Login from '../Login.vue';
 import Editor from '../Editor.vue';
 import NotFound from '../NotFound.vue';
+import { getBase } from './url-manager.js';
 
 const routes = [
-  { 
+  {
     path: '/',
     name: 'Home',
     component: Home,
@@ -42,6 +43,11 @@ const routes = [
     component: NotFound,
   }
 ]
+
+for (const route of routes) {
+  if (route.name === 'NotFound') continue;
+  route.path = getBase() + route.path;
+}
 
 const router = createRouter({
   history: createWebHistory(),

@@ -2,7 +2,7 @@ import * as Tone from 'tone';
 import { urls } from '../js/samples.js';
 import { Key } from './classes.js';
 import { barsToSeconds, secondsToBars } from '../js/utility.js';
-
+import { getBase } from './url-manager.js';
 
 const synths = {};
 let lastSynth = '';
@@ -12,7 +12,7 @@ async function loadSynth(identifier) {
     synths[identifier] = new Tone.Sampler({
       urls: urls[identifier],
       release: 1,
-      baseUrl: `/samples/${identifier}/`,
+      baseUrl: getBase() + `/samples/${identifier}/`,
     }).toDestination();
     await Tone.loaded();
     lastSynth = identifier;
